@@ -54,6 +54,7 @@ afconvert -f WAVE -d LEI16@16000 -c 1 \
     -m "$MODEL_PATH" \
     -f "$TEST_DIR/test.wav" \
     -l de \
+    -ng \
     -otxt \
     -of "$TEST_DIR/transcript" \
     -np >/dev/null 2>&1
