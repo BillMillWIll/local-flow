@@ -28,11 +28,14 @@ to a transcription API.
 - configurable push-to-talk key, including `fn`/Globe
 - local German transcription with `whisper.cpp`
 - selectable Small Q5_1 and Large v3 Turbo Q5_0 models
-- automatic, checksum-verified model download
+- automatic, revision-pinned and checksum-verified model download
+- visible download progress and retry action
 - system-default or manually selected microphone
 - test recording
 - local history of the last five transcripts
 - automatic paste with clipboard restoration
+- automatic update check with a direct link to the newest GitHub release
+- native application icon
 
 ## Requirements
 
@@ -54,11 +57,14 @@ Release builds require Homebrew installations of `whisper-cpp`, `ggml`, and
 Read [CURRENT-STATE.md](CURRENT-STATE.md) before changing release behavior.
 Distribution details are in [DISTRIBUTION.md](DISTRIBUTION.md).
 
+The source code is publicly visible but is not open source. See [LICENSE](LICENSE).
+
 ## Privacy
 
 Recordings are created temporarily on the Mac and processed locally. The
 selected Whisper model is downloaded from the official `whisper.cpp`
-repository on Hugging Face. See [SECURITY.md](SECURITY.md).
+repository on Hugging Face at a fixed repository revision. See
+[SECURITY.md](SECURITY.md).
 
 ## Current Limitation
 

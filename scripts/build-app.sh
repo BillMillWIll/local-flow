@@ -11,6 +11,7 @@ WHISPER_DIR="$RESOURCES_DIR/whisper"
 WHISPER_BIN_DIR="$WHISPER_DIR/bin"
 WHISPER_LIB_DIR="$WHISPER_DIR/lib"
 LICENSES_DIR="$RESOURCES_DIR/licenses"
+ICONSET_DIR="$BUILD_DIR/LocalFlow.iconset"
 VERSION="$(tr -d '[:space:]' < "$ROOT_DIR/VERSION")"
 BUILD_NUMBER="${BUILD_NUMBER:-1}"
 
@@ -37,7 +38,23 @@ cp -L "$GGML_PREFIX/lib/libggml-base.0.dylib" "$WHISPER_LIB_DIR/libggml-base.0.d
 cp -L "$LIBOMP_PREFIX/lib/libomp.dylib" "$WHISPER_LIB_DIR/libomp.dylib"
 cp "$WHISPER_PREFIX/LICENSE" "$LICENSES_DIR/whisper.cpp-LICENSE.txt"
 cp "$GGML_PREFIX/LICENSE" "$LICENSES_DIR/ggml-LICENSE.txt"
+cp "$ROOT_DIR/ThirdParty/libomp-LICENSE.txt" "$LICENSES_DIR/libomp-LICENSE.txt"
 cp "$ROOT_DIR/THIRD-PARTY-NOTICES.md" "$LICENSES_DIR/THIRD-PARTY-NOTICES.md"
+cp "$ROOT_DIR/LICENSE" "$LICENSES_DIR/Local-Flow-LICENSE.txt"
+
+rm -rf "$ICONSET_DIR"
+mkdir -p "$ICONSET_DIR"
+for size in 16 32 128 256 512; do
+    sips -z "$size" "$size" \
+        "$ROOT_DIR/Assets/LocalFlowIcon-1024.png" \
+        --out "$ICONSET_DIR/icon_${size}x${size}.png" >/dev/null
+    double_size=$((size * 2))
+    sips -z "$double_size" "$double_size" \
+        "$ROOT_DIR/Assets/LocalFlowIcon-1024.png" \
+        --out "$ICONSET_DIR/icon_${size}x${size}@2x.png" >/dev/null
+done
+iconutil -c icns "$ICONSET_DIR" -o "$RESOURCES_DIR/LocalFlow.icns"
+rm -rf "$ICONSET_DIR"
 
 chmod 755 "$WHISPER_BIN_DIR/whisper-cli"
 
@@ -74,6 +91,8 @@ cat > "$CONTENTS_DIR/Info.plist" <<'PLIST'
     <string>Local Flow</string>
     <key>CFBundleDisplayName</key>
     <string>Local Flow</string>
+    <key>CFBundleIconFile</key>
+    <string>LocalFlow</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>

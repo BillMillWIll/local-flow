@@ -26,6 +26,7 @@ The DMG contains:
 - the portable `Local Flow.app`
 - a link to the macOS Applications folder
 - bundled `whisper-cli` runtime and third-party notices
+- the Local Flow app icon
 
 It does not contain Whisper models, recordings, settings or credentials.
 
@@ -67,6 +68,11 @@ gh release create "vVERSION" \
 
 Downloaded models, selected settings and transcript history remain in the
 user's Library and are not removed by replacing the app.
+
+Local Flow checks the latest GitHub release on startup. If a newer semantic
+version exists, the settings window and menu-bar menu link to that release.
+Installation still uses the explicit DMG replacement flow; the app does not
+silently replace itself.
 
 ## Gatekeeper
 

@@ -3,6 +3,7 @@ build/
 dist/
 .swiftpm/
 .DS_Store
+.idea/
 
 # Local configuration and secrets
 .env

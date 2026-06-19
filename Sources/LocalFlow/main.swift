@@ -42,7 +42,13 @@ private enum LocalFlowError: LocalizedError {
 
 private enum ModelInstaller {
     static var modelDirectory: URL {
-        FileManager.default.homeDirectoryForCurrentUser
+        if let override = ProcessInfo.processInfo.environment[
+            "LOCAL_FLOW_MODEL_DIRECTORY"
+        ], !override.isEmpty {
+            return URL(fileURLWithPath: override, isDirectory: true)
+        }
+
+        return FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/Application Support/LocalFlow")
     }
 
@@ -54,7 +60,10 @@ private enum ModelInstaller {
         FileManager.default.fileExists(atPath: modelURL(for: model).path)
     }
 
-    static func install(_ model: WhisperModel) async throws {
+    static func install(
+        _ model: WhisperModel,
+        progress: @escaping @Sendable (ModelDownloadProgress) -> Void
+    ) async throws {
         if isInstalled(model) {
             return
         }
@@ -67,15 +76,17 @@ private enum ModelInstaller {
         let partialURL = modelURL(for: model).appendingPathExtension("part")
         try? FileManager.default.removeItem(at: partialURL)
 
-        let temporaryURL: URL
         do {
-            (temporaryURL, _) = try await URLSession.shared.download(from: model.downloadURL)
+            try await ModelDownloadTask.download(
+                from: model.downloadURL,
+                to: partialURL,
+                progress: progress
+            )
         } catch {
             throw LocalFlowError.modelDownloadFailed
         }
 
         do {
-            try FileManager.default.moveItem(at: temporaryURL, to: partialURL)
             let checksum = try await Task.detached {
                 try Self.sha256(of: partialURL)
             }.value
@@ -109,6 +120,135 @@ private enum ModelInstaller {
         }
 
         return hasher.finalize().map { String(format: "%02x", $0) }.joined()
+    }
+}
+
+private final class ModelDownloadTask: NSObject, URLSessionDownloadDelegate, @unchecked Sendable {
+    private let destinationURL: URL
+    private let progress: @Sendable (ModelDownloadProgress) -> Void
+    private var continuation: CheckedContinuation<Void, Error>?
+    private var session: URLSession?
+    private var lastReportedPercentage: Int?
+    private var reportedUnknownProgress = false
+
+    private init(
+        destinationURL: URL,
+        progress: @escaping @Sendable (ModelDownloadProgress) -> Void
+    ) {
+        self.destinationURL = destinationURL
+        self.progress = progress
+    }
+
+    static func download(
+        from sourceURL: URL,
+        to destinationURL: URL,
+        progress: @escaping @Sendable (ModelDownloadProgress) -> Void
+    ) async throws {
+        let delegate = ModelDownloadTask(
+            destinationURL: destinationURL,
+            progress: progress
+        )
+        try await delegate.start(sourceURL)
+    }
+
+    private func start(_ sourceURL: URL) async throws {
+        try await withCheckedThrowingContinuation { continuation in
+            self.continuation = continuation
+            let configuration = URLSessionConfiguration.ephemeral
+            configuration.timeoutIntervalForResource = 3_600
+            let session = URLSession(
+                configuration: configuration,
+                delegate: self,
+                delegateQueue: nil
+            )
+            self.session = session
+            session.downloadTask(with: sourceURL).resume()
+        }
+    }
+
+    func urlSession(
+        _ session: URLSession,
+        downloadTask: URLSessionDownloadTask,
+        didWriteData bytesWritten: Int64,
+        totalBytesWritten: Int64,
+        totalBytesExpectedToWrite: Int64
+    ) {
+        let total = totalBytesExpectedToWrite > 0
+            ? totalBytesExpectedToWrite
+            : nil
+        let currentProgress = ModelDownloadProgress(
+            receivedBytes: totalBytesWritten,
+            totalBytes: total
+        )
+        if let percentage = currentProgress.percentage {
+            guard percentage != lastReportedPercentage else { return }
+            lastReportedPercentage = percentage
+        } else {
+            guard !reportedUnknownProgress else { return }
+            reportedUnknownProgress = true
+        }
+        progress(currentProgress)
+    }
+
+    func urlSession(
+        _ session: URLSession,
+        downloadTask: URLSessionDownloadTask,
+        didFinishDownloadingTo location: URL
+    ) {
+        do {
+            try? FileManager.default.removeItem(at: destinationURL)
+            try FileManager.default.moveItem(at: location, to: destinationURL)
+            finish(.success(()))
+        } catch {
+            finish(.failure(error))
+        }
+    }
+
+    func urlSession(
+        _ session: URLSession,
+        task: URLSessionTask,
+        didCompleteWithError error: Error?
+    ) {
+        if let error {
+            finish(.failure(error))
+        }
+    }
+
+    private func finish(_ result: Result<Void, Error>) {
+        guard let continuation else { return }
+        self.continuation = nil
+        session?.finishTasksAndInvalidate()
+        session = nil
+        continuation.resume(with: result)
+    }
+}
+
+private struct GitHubRelease: Decodable, Sendable {
+    let tagName: String
+    let htmlURL: URL
+
+    private enum CodingKeys: String, CodingKey {
+        case tagName = "tag_name"
+        case htmlURL = "html_url"
+    }
+}
+
+private enum UpdateChecker {
+    static let latestReleaseAPI = URL(
+        string: "https://api.github.com/repos/BillMillWIll/local-flow/releases/latest"
+    )!
+
+    static func latestRelease() async throws -> GitHubRelease {
+        var request = URLRequest(url: latestReleaseAPI)
+        request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
+        request.setValue("Local-Flow", forHTTPHeaderField: "User-Agent")
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let httpResponse = response as? HTTPURLResponse,
+              (200..<300).contains(httpResponse.statusCode)
+        else {
+            throw URLError(.badServerResponse)
+        }
+        return try JSONDecoder().decode(GitHubRelease.self, from: data)
     }
 }
 
@@ -526,14 +666,20 @@ private final class SettingsWindowController: NSWindowController {
     private let historyButton = NSButton()
     private let resultLabel = NSTextField(wrappingLabelWithString: "")
     private let statusLabel = NSTextField(labelWithString: "")
+    private let downloadProgress = NSProgressIndicator()
+    private let retryDownloadButton = NSButton()
+    private let updateButton = NSButton()
     private let permissionsLabel = NSTextField(wrappingLabelWithString: "")
     private var captureMonitor: Any?
+    private var updateURL: URL?
     private let onKeyChanged: (PushToTalkKey) -> Void
     private let onModelChanged: (WhisperModel) -> Void
     private let onMicrophoneChanged: (MicrophoneSelection) -> Void
     private let onTestRecording: () -> Void
     private let onCopyLatestTranscript: () -> Void
     private let onCopyHistoryTranscript: (String) -> Void
+    private let onRetryModelDownload: () -> Void
+    private let onCheckForUpdates: () -> Void
     private var availableMicrophones: [MicrophoneSelection] = []
     private var transcriptHistory = TranscriptHistory()
 
@@ -546,7 +692,9 @@ private final class SettingsWindowController: NSWindowController {
         onMicrophoneChanged: @escaping (MicrophoneSelection) -> Void,
         onTestRecording: @escaping () -> Void,
         onCopyLatestTranscript: @escaping () -> Void,
-        onCopyHistoryTranscript: @escaping (String) -> Void
+        onCopyHistoryTranscript: @escaping (String) -> Void,
+        onRetryModelDownload: @escaping () -> Void,
+        onCheckForUpdates: @escaping () -> Void
     ) {
         self.onKeyChanged = onKeyChanged
         self.onModelChanged = onModelChanged
@@ -554,9 +702,11 @@ private final class SettingsWindowController: NSWindowController {
         self.onTestRecording = onTestRecording
         self.onCopyLatestTranscript = onCopyLatestTranscript
         self.onCopyHistoryTranscript = onCopyHistoryTranscript
+        self.onRetryModelDownload = onRetryModelDownload
+        self.onCheckForUpdates = onCheckForUpdates
 
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 520, height: 560),
+            contentRect: NSRect(x: 0, y: 0, width: 520, height: 620),
             styleMask: [.titled, .closable, .miniaturizable],
             backing: .buffered,
             defer: false
@@ -609,6 +759,42 @@ private final class SettingsWindowController: NSWindowController {
         testButton.isEnabled = enabled
     }
 
+    func setModelDownloadProgress(_ progress: ModelDownloadProgress?) {
+        guard let progress else {
+            downloadProgress.isHidden = true
+            retryDownloadButton.isHidden = true
+            return
+        }
+
+        downloadProgress.isHidden = false
+        retryDownloadButton.isHidden = true
+        if let percentage = progress.percentage {
+            downloadProgress.isIndeterminate = false
+            downloadProgress.doubleValue = Double(percentage)
+        } else {
+            downloadProgress.isIndeterminate = true
+            downloadProgress.startAnimation(nil)
+        }
+    }
+
+    func setModelDownloadFailed() {
+        downloadProgress.stopAnimation(nil)
+        downloadProgress.isHidden = true
+        retryDownloadButton.isHidden = false
+    }
+
+    func setUpdateAvailable(version: String, url: URL) {
+        updateButton.title = "Update \(version) laden"
+        updateURL = url
+        updateButton.isHidden = false
+    }
+
+    func setUpdateCheckResult(_ text: String) {
+        updateButton.title = text
+        updateURL = nil
+        updateButton.isHidden = false
+    }
+
     func setHasTranscriptHistory(_ hasHistory: Bool) {
         copyLatestButton.isEnabled = hasHistory
         historyButton.isEnabled = hasHistory
@@ -635,11 +821,8 @@ private final class SettingsWindowController: NSWindowController {
     ) {
         guard let contentView = window?.contentView else { return }
 
-        let icon = NSImageView(image: NSImage(
-            systemSymbolName: "waveform.circle.fill",
-            accessibilityDescription: "Local Flow"
-        )!)
-        icon.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 46, weight: .medium)
+        let icon = NSImageView(image: NSApp.applicationIconImage)
+        icon.imageScaling = .scaleProportionallyUpOrDown
 
         let title = NSTextField(labelWithString: "Local Flow")
         title.font = .systemFont(ofSize: 24, weight: .bold)
@@ -699,6 +882,24 @@ private final class SettingsWindowController: NSWindowController {
 
         statusLabel.stringValue = "Bereit"
         statusLabel.textColor = .secondaryLabelColor
+
+        downloadProgress.minValue = 0
+        downloadProgress.maxValue = 100
+        downloadProgress.controlSize = .small
+        downloadProgress.style = .bar
+        downloadProgress.isHidden = true
+
+        retryDownloadButton.title = "Download erneut versuchen"
+        retryDownloadButton.target = self
+        retryDownloadButton.action = #selector(retryModelDownload)
+        retryDownloadButton.bezelStyle = .rounded
+        retryDownloadButton.isHidden = true
+
+        updateButton.title = "Nach Updates suchen"
+        updateButton.target = self
+        updateButton.action = #selector(checkForUpdates)
+        updateButton.bezelStyle = .rounded
+
         permissionsLabel.font = .systemFont(ofSize: 12, weight: .medium)
 
         let permissionsButton = NSButton(
@@ -715,7 +916,7 @@ private final class SettingsWindowController: NSWindowController {
         )
         quitButton.bezelStyle = .rounded
 
-        let buttonRow = NSStackView(views: [permissionsButton, quitButton])
+        let buttonRow = NSStackView(views: [permissionsButton, updateButton, quitButton])
         buttonRow.orientation = .horizontal
         buttonRow.spacing = 10
 
@@ -731,7 +932,8 @@ private final class SettingsWindowController: NSWindowController {
         let stack = NSStackView(views: [
             icon, title, subtitle, keyLabel, keyRow, modelLabel, modelPopup,
             microphoneLabel, microphonePopup, actionRow, resultLabel,
-            permissionsLabel, statusLabel, buttonRow
+            downloadProgress, retryDownloadButton, permissionsLabel,
+            statusLabel, buttonRow
         ])
         stack.orientation = .vertical
         stack.alignment = .leading
@@ -743,9 +945,12 @@ private final class SettingsWindowController: NSWindowController {
             stack.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 28),
             stack.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -28),
             stack.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 24),
+            icon.widthAnchor.constraint(equalToConstant: 56),
+            icon.heightAnchor.constraint(equalToConstant: 56),
             keyValueLabel.widthAnchor.constraint(equalToConstant: 190),
             modelPopup.widthAnchor.constraint(equalToConstant: 360),
             microphonePopup.widthAnchor.constraint(equalToConstant: 360),
+            downloadProgress.widthAnchor.constraint(equalToConstant: 360),
             resultLabel.widthAnchor.constraint(equalToConstant: 460)
         ])
     }
@@ -800,6 +1005,18 @@ private final class SettingsWindowController: NSWindowController {
     @objc private func copyTranscriptFromHistoryButton(_ sender: NSMenuItem) {
         guard let transcript = sender.representedObject as? String else { return }
         onCopyHistoryTranscript(transcript)
+    }
+
+    @objc private func retryModelDownload() {
+        onRetryModelDownload()
+    }
+
+    @objc private func checkForUpdates() {
+        if let url = updateURL {
+            NSWorkspace.shared.open(url)
+        } else {
+            onCheckForUpdates()
+        }
     }
 
     @objc private func startKeyCapture() {
@@ -962,6 +1179,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem!
     private var statusMenuItem: NSMenuItem!
     private var copyLatestMenuItem: NSMenuItem!
+    private var updateMenuItem: NSMenuItem!
     private var historyMenu: NSMenu!
     private var pushToTalkState = PushToTalkState()
     private var selectedKey = PushToTalkKey.defaultKey
@@ -1010,6 +1228,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
             refreshPermissions()
             settingsWindowController?.refreshMicrophones(selected: selectedMicrophone)
             await installSelectedModelIfNeeded()
+            await checkForUpdates(showCurrentResult: false)
         }
     }
 
@@ -1053,6 +1272,13 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         let historyItem = NSMenuItem(title: "Transkript-Historie", action: nil, keyEquivalent: "")
         historyItem.submenu = historyMenu
         menu.addItem(historyItem)
+        updateMenuItem = NSMenuItem(
+            title: "Nach Updates suchen",
+            action: #selector(checkForUpdatesFromMenu),
+            keyEquivalent: ""
+        )
+        updateMenuItem.target = self
+        menu.addItem(updateMenuItem)
         menu.addItem(
             withTitle: "Local Flow beenden",
             action: #selector(NSApplication.terminate(_:)),
@@ -1083,6 +1309,12 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
             },
             onCopyHistoryTranscript: { [weak self] transcript in
                 self?.copyTranscriptToPasteboard(transcript)
+            },
+            onRetryModelDownload: { [weak self] in
+                Task { await self?.installSelectedModelIfNeeded() }
+            },
+            onCheckForUpdates: { [weak self] in
+                Task { await self?.checkForUpdates(showCurrentResult: true) }
             }
         )
     }
@@ -1288,16 +1520,31 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
 
         isInstallingModel = true
         settingsWindowController?.setTestRecordingEnabled(false)
+        settingsWindowController?.setModelDownloadProgress(
+            ModelDownloadProgress(receivedBytes: 0, totalBytes: nil)
+        )
         updateStatus(
             "Lade \(model.title) einmalig herunter …",
             symbol: "arrow.down.circle"
         )
 
         do {
-            try await ModelInstaller.install(model)
+            try await ModelInstaller.install(model) { [weak self] progress in
+                Task { @MainActor in
+                    self?.settingsWindowController?.setModelDownloadProgress(progress)
+                    if let percentage = progress.percentage {
+                        self?.updateStatus(
+                            "Lade \(model.title): \(percentage) %",
+                            symbol: "arrow.down.circle"
+                        )
+                    }
+                }
+            }
+            settingsWindowController?.setModelDownloadProgress(nil)
             updateStatus("Sprachmodell ist bereit", symbol: "checkmark.circle.fill")
             resetStatusSoon()
         } catch {
+            settingsWindowController?.setModelDownloadFailed()
             show(error)
         }
 
@@ -1306,6 +1553,52 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
 
         if selectedModel != model {
             await installSelectedModelIfNeeded()
+        }
+    }
+
+    private func checkForUpdates(showCurrentResult: Bool) async {
+        do {
+            let release = try await UpdateChecker.latestRelease()
+            let currentVersion = Bundle.main.object(
+                forInfoDictionaryKey: "CFBundleShortVersionString"
+            ) as? String ?? "0.0.0"
+            let decision = UpdateDecision(
+                current: currentVersion,
+                latestTag: release.tagName
+            )
+
+            if decision.isUpdateAvailable {
+                let version = release.tagName.hasPrefix("v")
+                    ? String(release.tagName.dropFirst())
+                    : release.tagName
+                settingsWindowController?.setUpdateAvailable(
+                    version: version,
+                    url: release.htmlURL
+                )
+                updateMenuItem.title = "Update \(version) laden"
+                updateMenuItem.representedObject = release.htmlURL
+            } else if showCurrentResult {
+                settingsWindowController?.setUpdateCheckResult("App ist aktuell")
+                updateStatus("Local Flow ist aktuell", symbol: "checkmark.circle")
+                resetStatusSoon()
+            }
+        } catch {
+            if showCurrentResult {
+                settingsWindowController?.setUpdateCheckResult("Update-Prüfung wiederholen")
+                updateStatus(
+                    "Update-Prüfung fehlgeschlagen",
+                    symbol: "exclamationmark.triangle"
+                )
+                resetStatusSoon()
+            }
+        }
+    }
+
+    @objc private func checkForUpdatesFromMenu(_ sender: NSMenuItem) {
+        if let url = sender.representedObject as? URL {
+            NSWorkspace.shared.open(url)
+        } else {
+            Task { await checkForUpdates(showCurrentResult: true) }
         }
     }
 
@@ -1351,8 +1644,34 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 }
 
+private func runModelDownloadDiagnostic(model: WhisperModel) -> Never {
+    Task {
+        do {
+            try await ModelInstaller.install(model) { progress in
+                if let percentage = progress.percentage {
+                    print("Download: \(percentage) %")
+                }
+            }
+            print("Modell geprüft: \(ModelInstaller.modelURL(for: model).path)")
+            exit(EXIT_SUCCESS)
+        } catch {
+            fputs("\(error.localizedDescription)\n", stderr)
+            exit(EXIT_FAILURE)
+        }
+    }
+    dispatchMain()
+}
+
 let app = NSApplication.shared
-private let delegate = AppDelegate()
-app.delegate = delegate
-app.setActivationPolicy(.regular)
-app.run()
+if let argumentIndex = CommandLine.arguments.firstIndex(of: "--download-model"),
+   CommandLine.arguments.indices.contains(argumentIndex + 1),
+   let model = WhisperModel(
+       rawValue: CommandLine.arguments[argumentIndex + 1]
+   ) {
+    runModelDownloadDiagnostic(model: model)
+} else {
+    let delegate = AppDelegate()
+    app.delegate = delegate
+    app.setActivationPolicy(.regular)
+    app.run()
+}

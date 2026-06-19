@@ -1,6 +1,8 @@
 import Foundation
 
 public enum WhisperModel: String, CaseIterable, Sendable {
+    public static let repositoryRevision = "5359861c739e955e79d9a303bcbc70fb988958b1"
+
     case small
     case largeTurbo
 
@@ -30,7 +32,7 @@ public enum WhisperModel: String, CaseIterable, Sendable {
 
     public var downloadURL: URL {
         URL(
-            string: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/\(fileName)"
+            string: "https://huggingface.co/ggerganov/whisper.cpp/resolve/\(Self.repositoryRevision)/\(fileName)"
         )!
     }
 
@@ -41,6 +43,70 @@ public enum WhisperModel: String, CaseIterable, Sendable {
         case .largeTurbo:
             return "394221709cd5ad1f40c46e6031ca61bce88931e6e088c188294c6d5a55ffa7e2"
         }
+    }
+}
+
+public struct ModelDownloadProgress: Equatable, Sendable {
+    public let receivedBytes: Int64
+    public let totalBytes: Int64?
+
+    public init(receivedBytes: Int64, totalBytes: Int64?) {
+        self.receivedBytes = receivedBytes
+        self.totalBytes = totalBytes
+    }
+
+    public var percentage: Int? {
+        guard let totalBytes, totalBytes > 0 else { return nil }
+        let value = Int((Double(receivedBytes) / Double(totalBytes)) * 100)
+        return min(max(value, 0), 100)
+    }
+}
+
+public struct AppVersion: Comparable, Sendable {
+    public let major: Int
+    public let minor: Int
+    public let patch: Int
+
+    public init?(_ value: String) {
+        let parts = value.split(separator: ".", omittingEmptySubsequences: false)
+        guard parts.count == 3,
+              let major = Int(parts[0]),
+              let minor = Int(parts[1]),
+              let patch = Int(parts[2]),
+              major >= 0, minor >= 0, patch >= 0
+        else {
+            return nil
+        }
+
+        self.major = major
+        self.minor = minor
+        self.patch = patch
+    }
+
+    public init?(gitHubTag: String) {
+        let value = gitHubTag.hasPrefix("v")
+            ? String(gitHubTag.dropFirst())
+            : gitHubTag
+        self.init(value)
+    }
+
+    public static func < (lhs: AppVersion, rhs: AppVersion) -> Bool {
+        (lhs.major, lhs.minor, lhs.patch) < (rhs.major, rhs.minor, rhs.patch)
+    }
+}
+
+public struct UpdateDecision: Sendable {
+    public let isUpdateAvailable: Bool
+
+    public init(current: String, latestTag: String) {
+        guard let currentVersion = AppVersion(current),
+              let latestVersion = AppVersion(gitHubTag: latestTag)
+        else {
+            isUpdateAvailable = false
+            return
+        }
+
+        isUpdateAvailable = latestVersion > currentVersion
     }
 }
 

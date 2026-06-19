@@ -1,0 +1,44 @@
+name: Release Check
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  portable-macos:
+    runs-on: macos-15
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify runner
+        run: |
+          uname -m
+          sw_vers
+          test "$(uname -m)" = "arm64"
+
+      - name: Install release dependencies
+        run: brew install whisper-cpp libomp
+
+      - name: Test and scan
+        run: ./scripts/check-release.sh
+
+      - name: Test portable app
+        run: ./scripts/test-portable-release.sh
+
+      - name: Build DMG
+        run: ./scripts/build-dmg.sh
+
+      - name: Upload DMG test artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: local-flow-dmg
+          path: |
+            dist/*.dmg
+            dist/*.sha256

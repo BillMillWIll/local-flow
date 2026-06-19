@@ -21,6 +21,9 @@ This is the first file to read in a new session before changing Local Flow.
 - The selected model downloads automatically on first use from:
   `ggerganov/whisper.cpp` on Hugging Face.
 - Every downloaded model is checked against a hard-coded SHA-256 checksum.
+- Model URLs are pinned to Hugging Face repository revision
+  `5359861c739e955e79d9a303bcbc70fb988958b1`.
+- The UI displays percentage progress and exposes a retry button after errors.
 - Models are stored in:
   `~/Library/Application Support/LocalFlow/`
 - App settings and the last five transcripts are stored in macOS
@@ -44,6 +47,9 @@ older Local Flow installations remain usable.
 - `scripts/check-release.sh`: secret scan, tracked-file validation and tests
 - `scripts/build-app.sh`: portable application bundle
 - `scripts/build-dmg.sh`: final DMG and SHA-256 file
+- `scripts/test-portable-release.sh`: clean model-directory download and
+  bundled-runtime transcription test
+- `.github/workflows/release-check.yml`: fresh ARM64 macOS release validation
 - `DISTRIBUTION.md`: release procedure
 - `SECURITY.md`: privacy and reporting
 
@@ -56,7 +62,12 @@ older Local Flow installations remain usable.
 - Apple notarization is not configured.
 - There is no automatic updater yet; updates are installed by replacing the
   application with the newer DMG.
+- The app checks GitHub Releases automatically and links directly to a newer
+  DMG when available.
 - Models, settings and transcript history survive app replacement.
+- The app has a generated native icon.
+- Complete `whisper.cpp`, `ggml`, and `libomp` license texts are included.
+- Local Flow source and release use are governed by the repository `LICENSE`.
 
 ## Safety Rules
 
@@ -70,7 +81,7 @@ older Local Flow installations remain usable.
 
 ## Next Sensible Steps
 
-1. Test the DMG on a second Apple Silicon Mac without Homebrew.
-2. Confirm first-run Gatekeeper, microphone and accessibility instructions.
-3. Add Developer ID signing and notarization if distribution expands.
-4. Consider Sparkle only when manual updates become inconvenient.
+1. Confirm first-run microphone and accessibility interaction with a friend.
+2. Add Developer ID signing and notarization if distribution expands.
+3. Consider Sparkle only when browser-based update installation becomes
+   inconvenient.
