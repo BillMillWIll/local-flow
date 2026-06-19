@@ -26,12 +26,14 @@ fi
 
 grep -Fq 'DMG_WINDOW_WIDTH=660' "$BUILD_SCRIPT"
 grep -Fq 'DMG_WINDOW_HEIGHT=540' "$BUILD_SCRIPT"
-grep -Fq '/System/Library/PreferencePanes/Security.prefPane' "$BUILD_SCRIPT"
+if grep -Eq 'Security\\.prefPane|Systemeinstellungen öffnen' "$BUILD_SCRIPT"; then
+    echo "DMG darf keinen PREF-Link oder zusätzliches Hilfssymbol enthalten." >&2
+    exit 1
+fi
 grep -Fq 'create-dmg' "$BUILD_SCRIPT"
 grep -Fq -- '--window-size "$DMG_WINDOW_WIDTH" "$DMG_WINDOW_HEIGHT"' "$BUILD_SCRIPT"
 grep -Fq -- '--icon "Local Flow.app" 170 220' "$BUILD_SCRIPT"
 grep -Fq -- '--icon "Programme" 490 220' "$BUILD_SCRIPT"
-grep -Fq -- '--icon "Systemeinstellungen öffnen" 150 405' "$BUILD_SCRIPT"
 grep -Fq -- '--background "$BACKGROUND_PNG"' "$BUILD_SCRIPT"
 grep -Fq 'render-dmg-background.swift' "$BUILD_SCRIPT"
 if grep -Eq 'osascript|hdiutil attach' "$BUILD_SCRIPT"; then

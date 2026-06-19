@@ -36,17 +36,16 @@
         fill="#f7f8fa" font-family="-apple-system, BlinkMacSystemFont, sans-serif"
         font-size="13" font-weight="600">Fehlermeldung beim Öffnen?</text>
 
-  <text x="150" y="350" text-anchor="middle"
-        fill="#f7f8fa" font-family="-apple-system, BlinkMacSystemFont, sans-serif"
-        font-size="12" font-weight="600">1. Systemeinstellungen öffnen</text>
-
-  <text x="280" y="365"
+  <text x="175" y="358"
+        fill="#b7c1ce" font-family="-apple-system, BlinkMacSystemFont, sans-serif"
+        font-size="12">1. Systemeinstellungen öffnen</text>
+  <text x="175" y="390"
         fill="#b7c1ce" font-family="-apple-system, BlinkMacSystemFont, sans-serif"
         font-size="12">2. Datenschutz &amp; Sicherheit auswählen</text>
-  <text x="280" y="397"
+  <text x="175" y="422"
         fill="#b7c1ce" font-family="-apple-system, BlinkMacSystemFont, sans-serif"
         font-size="12">3. Ganz nach unten zu Sicherheit scrollen</text>
-  <text x="280" y="429"
+  <text x="175" y="454"
         fill="#b7c1ce" font-family="-apple-system, BlinkMacSystemFont, sans-serif"
         font-size="12">4. Bei Local Flow „Dennoch öffnen“ klicken</text>
 </svg>
