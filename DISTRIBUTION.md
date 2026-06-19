@@ -25,6 +25,7 @@ The DMG contains:
 
 - the portable `Local Flow.app`
 - a link to the macOS Applications folder
+- a link to Privacy & Security for manual first-launch approval
 - a compact visual drag-to-Applications installation layout
 - bundled `whisper-cli` runtime and third-party notices
 - the Local Flow app icon

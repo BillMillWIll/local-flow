@@ -11,7 +11,7 @@ guard CommandLine.arguments.count == 3 else {
 let sourceURL = URL(fileURLWithPath: CommandLine.arguments[1])
 let outputURL = URL(fileURLWithPath: CommandLine.arguments[2])
 let width = 660
-let height = 400
+let height = 540
 
 guard let sourceImage = NSImage(contentsOf: sourceURL),
       let bitmap = NSBitmapImageRep(
