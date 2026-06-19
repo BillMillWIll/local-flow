@@ -10,7 +10,10 @@ test -f "$BACKGROUND"
 test -f "$BACKGROUND_RENDERER"
 grep -Fq 'Local Flow nach Programme ziehen' "$BACKGROUND"
 grep -Fq 'viewBox="0 0 660 400"' "$BACKGROUND"
-grep -Fq 'fill="#f4f7fb" opacity="0.9"' "$BACKGROUND"
+if grep -Eq '<rect x="(75|395)" y="132"' "$BACKGROUND"; then
+    echo "DMG-Hintergrund darf keine Karten hinter den beiden Icons enthalten." >&2
+    exit 1
+fi
 if grep -Fq '<filter' "$BACKGROUND"; then
     echo "DMG-Hintergrund darf keine von CoreSVG nicht unterstützten Filter nutzen." >&2
     exit 1
