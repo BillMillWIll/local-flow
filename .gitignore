@@ -1,0 +1,34 @@
+.build/
+build/
+dist/
+.swiftpm/
+.DS_Store
+
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+private/
+credentials/
+secrets/
+*.key
+*.pem
+*.p12
+*.mobileprovision
+*.xcuserstate
+xcuserdata/
+
+# Downloaded models and temporary recordings
+*.bin
+*.part
+*.wav
+*.mp3
+*.m4a
+*.txt.tmp
+
+# Local release and signing material
+release-private/
+*.dmg
+*.pkg
+*.zip
+*.notarytool-profile
