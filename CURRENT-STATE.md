@@ -59,8 +59,9 @@ older Local Flow installations remain usable.
 - DMG generation is implemented.
 - The DMG uses a fixed compact 660 x 540 Finder layout with a branded
   background, drag arrow and German installation instruction.
-- A `Freigabe öffnen` link in the DMG opens Apple's own Privacy & Security
-  settings page for the manual Gatekeeper approval flow.
+- A `Systemeinstellungen öffnen` link in the DMG opens Apple's own Privacy &
+  Security settings page. The DMG lists the complete manual Gatekeeper
+  approval flow in order.
 - Release artifacts are generated under `dist/` and are ignored by Git.
 - Current signature is ad-hoc.
 - Apple notarization is not configured.

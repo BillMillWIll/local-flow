@@ -24,7 +24,7 @@ mkdir -p "$STAGING_DIR" "$DIST_DIR"
 cp -R "$ROOT_DIR/build/Local Flow.app" "$STAGING_DIR/Local Flow.app"
 ln -s /Applications "$STAGING_DIR/Programme"
 ln -s /System/Library/PreferencePanes/Security.prefPane \
-    "$STAGING_DIR/Freigabe öffnen"
+    "$STAGING_DIR/Systemeinstellungen öffnen"
 
 # Keep the editable SVG in the repository while Finder receives an exact-size
 # PNG rendered by AppKit.
@@ -41,7 +41,7 @@ create-dmg \
     --text-size 13 \
     --icon "Local Flow.app" 170 220 \
     --icon "Programme" 490 220 \
-    --icon "Freigabe öffnen" 330 395 \
+    --icon "Systemeinstellungen öffnen" 150 405 \
     --hide-extension "Local Flow.app" \
     --format UDZO \
     --filesystem APFS \
