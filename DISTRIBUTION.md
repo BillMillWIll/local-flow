@@ -5,7 +5,7 @@
 Prerequisites on the build Mac:
 
 ```bash
-brew install whisper-cpp libomp
+brew install whisper-cpp libomp create-dmg
 ```
 
 Create the checked DMG:
@@ -25,6 +25,7 @@ The DMG contains:
 
 - the portable `Local Flow.app`
 - a link to the macOS Applications folder
+- a compact visual drag-to-Applications installation layout
 - bundled `whisper-cli` runtime and third-party notices
 - the Local Flow app icon
 

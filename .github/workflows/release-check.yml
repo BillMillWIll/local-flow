@@ -24,7 +24,7 @@ jobs:
           test "$(uname -m)" = "arm64"
 
       - name: Install release dependencies
-        run: brew install whisper-cpp libomp
+        run: brew install whisper-cpp libomp create-dmg
 
       - name: Test and scan
         run: ./scripts/check-release.sh

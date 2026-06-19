@@ -28,5 +28,6 @@ if rg --hidden -n -i "$SECRET_PATTERN" \
 fi
 
 swift test
+"$ROOT_DIR/scripts/test-dmg-layout.sh"
 
 echo "Release-Check bestanden."

@@ -57,6 +57,8 @@ older Local Flow installations remain usable.
 
 - Portable bundle no longer requires Homebrew on the recipient Mac.
 - DMG generation is implemented.
+- The DMG uses a fixed compact 660 x 400 Finder layout with a branded
+  background, drag arrow and German installation instruction.
 - Release artifacts are generated under `dist/` and are ignored by Git.
 - Current signature is ad-hoc.
 - Apple notarization is not configured.
