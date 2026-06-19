@@ -29,5 +29,6 @@ fi
 
 swift test
 "$ROOT_DIR/scripts/test-dmg-layout.sh"
+"$ROOT_DIR/scripts/test-app-permissions.sh"
 
 echo "Release-Check bestanden."

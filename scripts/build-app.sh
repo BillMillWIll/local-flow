@@ -36,6 +36,7 @@ cp -L "$WHISPER_PREFIX/lib/libwhisper.1.dylib" "$WHISPER_LIB_DIR/libwhisper.1.dy
 cp -L "$GGML_PREFIX/lib/libggml.0.dylib" "$WHISPER_LIB_DIR/libggml.0.dylib"
 cp -L "$GGML_PREFIX/lib/libggml-base.0.dylib" "$WHISPER_LIB_DIR/libggml-base.0.dylib"
 cp -L "$LIBOMP_PREFIX/lib/libomp.dylib" "$WHISPER_LIB_DIR/libomp.dylib"
+chmod u+w "$WHISPER_LIB_DIR/"*.dylib
 cp "$WHISPER_PREFIX/LICENSE" "$LICENSES_DIR/whisper.cpp-LICENSE.txt"
 cp "$GGML_PREFIX/LICENSE" "$LICENSES_DIR/ggml-LICENSE.txt"
 cp "$ROOT_DIR/ThirdParty/libomp-LICENSE.txt" "$LICENSES_DIR/libomp-LICENSE.txt"
