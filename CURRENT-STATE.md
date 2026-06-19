@@ -68,6 +68,9 @@ older Local Flow installations remain usable.
 - The app has a generated native icon.
 - Complete `whisper.cpp`, `ggml`, and `libomp` license texts are included.
 - Local Flow source and release use are governed by the repository `LICENSE`.
+- GitHub's virtualized ARM64 runner validates the clean download, checksum,
+  executable runtime and DMG. Actual audio inference is tested locally because
+  `whisper.cpp` inference is unstable inside GitHub's macOS virtualization.
 
 ## Safety Rules
 

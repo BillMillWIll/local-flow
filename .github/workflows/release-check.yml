@@ -30,6 +30,8 @@ jobs:
         run: ./scripts/check-release.sh
 
       - name: Test portable app
+        env:
+          LOCAL_FLOW_SKIP_INFERENCE: "1"
         run: ./scripts/test-portable-release.sh
 
       - name: Build DMG

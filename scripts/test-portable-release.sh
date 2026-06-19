@@ -45,6 +45,13 @@ test -s "$MODEL_PATH"
 echo "ae85e4a935d7a567bd102fe55afc16bb595bdb618e11b2fc7591bc08120411bb  $MODEL_PATH" \
     | shasum -a 256 -c -
 
+if [[ "${LOCAL_FLOW_SKIP_INFERENCE:-0}" == "1" ]]; then
+    "$WHISPER_BINARY" -h >/dev/null 2>&1
+    codesign --verify --deep --strict "$APP_DIR"
+    echo "Portable-Release-Test ohne VM-Inferenz bestanden."
+    exit 0
+fi
+
 say -v Anna -o "$TEST_DIR/test.aiff" "Guten Tag. Dies ist ein Test."
 afconvert -f WAVE -d LEI16@16000 -c 1 \
     "$TEST_DIR/test.aiff" \
