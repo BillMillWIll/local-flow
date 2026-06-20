@@ -1,8 +1,10 @@
 # Current State
 
-Updated: 19 June 2026
+Updated: 20 June 2026
 
 This is the first file to read in a new session before changing Local Flow.
+Repository-wide AI instructions and the mandatory release workflow are defined
+in `AGENTS.md`.
 
 ## Product
 
