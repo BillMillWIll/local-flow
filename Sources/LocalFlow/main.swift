@@ -4,6 +4,7 @@ import AVFoundation
 import CoreAudio
 import CryptoKit
 import LocalFlowCore
+import QuartzCore
 
 private enum LocalFlowError: LocalizedError {
     case microphoneDenied
@@ -665,13 +666,23 @@ private final class SettingsWindowController: NSWindowController {
     private let copyLatestButton = NSButton()
     private let historyButton = NSButton()
     private let resultLabel = NSTextField(wrappingLabelWithString: "")
-    private let statusLabel = NSTextField(labelWithString: "")
+    private let statusSymbol = NSImageView()
+    private let statusTitleLabel = NSTextField(labelWithString: "")
+    private let statusDetailLabel = NSTextField(labelWithString: "")
     private let downloadProgress = NSProgressIndicator()
     private let retryDownloadButton = NSButton()
     private let updateButton = NSButton()
-    private let permissionsLabel = NSTextField(wrappingLabelWithString: "")
+    private let microphonePermissionSymbol = NSImageView()
+    private let microphonePermissionLabel = NSTextField(labelWithString: "Mikrofon")
+    private let microphonePermissionButton = NSButton()
+    private let accessibilityPermissionSymbol = NSImageView()
+    private let accessibilityPermissionLabel = NSTextField(labelWithString: "Bedienungshilfen")
+    private let accessibilityPermissionButton = NSButton()
+    private let advancedButton = NSButton()
+    private let advancedStack = NSStackView()
     private var captureMonitor: Any?
     private var updateURL: URL?
+    private var isAdvancedVisible = false
     private let onKeyChanged: (PushToTalkKey) -> Void
     private let onModelChanged: (WhisperModel) -> Void
     private let onMicrophoneChanged: (MicrophoneSelection) -> Void
@@ -706,7 +717,7 @@ private final class SettingsWindowController: NSWindowController {
         self.onCheckForUpdates = onCheckForUpdates
 
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 520, height: 620),
+            contentRect: NSRect(x: 0, y: 0, width: 580, height: 540),
             styleMask: [.titled, .closable, .miniaturizable],
             backing: .buffered,
             defer: false
@@ -735,7 +746,17 @@ private final class SettingsWindowController: NSWindowController {
     }
 
     func setStatus(_ text: String) {
-        statusLabel.stringValue = text
+        statusDetailLabel.stringValue = text
+    }
+
+    func setActivity(_ activity: LocalFlowActivity) {
+        statusTitleLabel.stringValue = activity.title
+        statusDetailLabel.stringValue = activity.detail
+        statusSymbol.image = NSImage(
+            systemSymbolName: activity.symbolName,
+            accessibilityDescription: activity.title
+        )
+        statusSymbol.contentTintColor = Self.color(for: activity.tone)
     }
 
     func setSelectedKey(_ key: PushToTalkKey) {
@@ -743,12 +764,18 @@ private final class SettingsWindowController: NSWindowController {
     }
 
     func setPermissionsStatus(microphoneAllowed: Bool, accessibilityAllowed: Bool) {
-        let microphone = microphoneAllowed ? "✓ Mikrofon" : "✗ Mikrofon"
-        let accessibility = accessibilityAllowed ? "✓ Bedienungshilfen" : "✗ Bedienungshilfen"
-        permissionsLabel.stringValue = "\(microphone)    \(accessibility)"
-        permissionsLabel.textColor = microphoneAllowed && accessibilityAllowed
-            ? .systemGreen
-            : .systemOrange
+        Self.configurePermission(
+            allowed: microphoneAllowed,
+            symbol: microphonePermissionSymbol,
+            label: microphonePermissionLabel,
+            button: microphonePermissionButton
+        )
+        Self.configurePermission(
+            allowed: accessibilityAllowed,
+            symbol: accessibilityPermissionSymbol,
+            label: accessibilityPermissionLabel,
+            button: accessibilityPermissionButton
+        )
     }
 
     func setTestResult(_ text: String) {
@@ -825,26 +852,60 @@ private final class SettingsWindowController: NSWindowController {
         icon.imageScaling = .scaleProportionallyUpOrDown
 
         let title = NSTextField(labelWithString: "Local Flow")
-        title.font = .systemFont(ofSize: 24, weight: .bold)
+        title.font = .systemFont(ofSize: 22, weight: .bold)
 
         let subtitle = NSTextField(
-            wrappingLabelWithString: "Taste gedrückt halten, sprechen und loslassen. Der Text wird lokal in das aktive Textfeld eingefügt."
+            labelWithString: "Lokal sprechen. Direkt einfügen."
         )
         subtitle.textColor = .secondaryLabelColor
 
-        let keyLabel = NSTextField(labelWithString: "Sprechtaste")
-        keyLabel.font = .systemFont(ofSize: 13, weight: .semibold)
+        let titleStack = NSStackView(views: [title, subtitle])
+        titleStack.orientation = .vertical
+        titleStack.alignment = .leading
+        titleStack.spacing = 2
+
+        let header = NSStackView(views: [icon, titleStack])
+        header.orientation = .horizontal
+        header.alignment = .centerY
+        header.spacing = 12
+
+        statusSymbol.imageScaling = .scaleProportionallyUpOrDown
+        statusTitleLabel.font = .systemFont(ofSize: 15, weight: .semibold)
+        statusDetailLabel.font = .systemFont(ofSize: 12)
+        statusDetailLabel.textColor = .secondaryLabelColor
+
+        let statusText = NSStackView(views: [statusTitleLabel, statusDetailLabel])
+        statusText.orientation = .vertical
+        statusText.alignment = .leading
+        statusText.spacing = 2
+
+        let statusRow = NSStackView(views: [statusSymbol, statusText])
+        statusRow.orientation = .horizontal
+        statusRow.alignment = .centerY
+        statusRow.spacing = 12
+
+        let statusSurface = NSView()
+        statusSurface.wantsLayer = true
+        statusSurface.layer?.cornerRadius = 12
+        statusSurface.layer?.backgroundColor = NSColor.controlBackgroundColor.cgColor
+        statusRow.translatesAutoresizingMaskIntoConstraints = false
+        statusSurface.addSubview(statusRow)
+        NSLayoutConstraint.activate([
+            statusRow.leadingAnchor.constraint(equalTo: statusSurface.leadingAnchor, constant: 16),
+            statusRow.trailingAnchor.constraint(equalTo: statusSurface.trailingAnchor, constant: -16),
+            statusRow.centerYAnchor.constraint(equalTo: statusSurface.centerYAnchor),
+            statusSurface.heightAnchor.constraint(equalToConstant: 72),
+            statusSymbol.widthAnchor.constraint(equalToConstant: 28),
+            statusSymbol.heightAnchor.constraint(equalToConstant: 28)
+        ])
 
         keyValueLabel.stringValue = selectedKey.title
-        keyValueLabel.font = .systemFont(ofSize: 15, weight: .medium)
+        keyValueLabel.font = .systemFont(ofSize: 13, weight: .medium)
 
-        learnKeyButton.title = "Taste anlernen"
+        learnKeyButton.title = "Ändern"
         learnKeyButton.target = self
         learnKeyButton.action = #selector(startKeyCapture)
         learnKeyButton.bezelStyle = .rounded
-
-        let modelLabel = NSTextField(labelWithString: "Sprachmodell")
-        modelLabel.font = .systemFont(ofSize: 13, weight: .semibold)
 
         modelPopup.addItems(withTitles: WhisperModel.allCases.map(\.title))
         modelPopup.selectItem(
@@ -853,8 +914,6 @@ private final class SettingsWindowController: NSWindowController {
         modelPopup.target = self
         modelPopup.action = #selector(modelSelectionChanged)
 
-        let microphoneLabel = NSTextField(labelWithString: "Mikrofon")
-        microphoneLabel.font = .systemFont(ofSize: 13, weight: .semibold)
         microphonePopup.target = self
         microphonePopup.action = #selector(microphoneSelectionChanged)
         refreshMicrophones(selected: selectedMicrophone)
@@ -863,6 +922,9 @@ private final class SettingsWindowController: NSWindowController {
         testButton.target = self
         testButton.action = #selector(testRecording)
         testButton.bezelStyle = .rounded
+        testButton.keyEquivalent = "\r"
+        testButton.contentTintColor = .systemMint
+        testButton.bezelColor = .systemMint
 
         copyLatestButton.title = "Letzten Text kopieren"
         copyLatestButton.target = self
@@ -878,10 +940,7 @@ private final class SettingsWindowController: NSWindowController {
 
         resultLabel.stringValue = "Noch kein Testtranskript."
         resultLabel.textColor = .secondaryLabelColor
-        resultLabel.maximumNumberOfLines = 4
-
-        statusLabel.stringValue = "Bereit"
-        statusLabel.textColor = .secondaryLabelColor
+        resultLabel.maximumNumberOfLines = 3
 
         downloadProgress.minValue = 0
         downloadProgress.maxValue = 100
@@ -900,40 +959,91 @@ private final class SettingsWindowController: NSWindowController {
         updateButton.action = #selector(checkForUpdates)
         updateButton.bezelStyle = .rounded
 
-        permissionsLabel.font = .systemFont(ofSize: 12, weight: .medium)
+        microphonePermissionButton.title = "Öffnen"
+        microphonePermissionButton.target = self
+        microphonePermissionButton.action = #selector(openMicrophoneSettings)
+        microphonePermissionButton.bezelStyle = .rounded
 
-        let permissionsButton = NSButton(
-            title: "Berechtigungen öffnen",
-            target: self,
-            action: #selector(openPrivacySettings)
+        accessibilityPermissionButton.title = "Öffnen"
+        accessibilityPermissionButton.target = self
+        accessibilityPermissionButton.action = #selector(openPrivacySettings)
+        accessibilityPermissionButton.bezelStyle = .rounded
+
+        let microphonePermissionRow = permissionRow(
+            symbol: microphonePermissionSymbol,
+            label: microphonePermissionLabel,
+            button: microphonePermissionButton
         )
-        permissionsButton.bezelStyle = .rounded
-
-        let quitButton = NSButton(
-            title: "Beenden",
-            target: NSApp,
-            action: #selector(NSApplication.terminate(_:))
+        let accessibilityPermissionRow = permissionRow(
+            symbol: accessibilityPermissionSymbol,
+            label: accessibilityPermissionLabel,
+            button: accessibilityPermissionButton
         )
-        quitButton.bezelStyle = .rounded
-
-        let buttonRow = NSStackView(views: [permissionsButton, updateButton, quitButton])
-        buttonRow.orientation = .horizontal
-        buttonRow.spacing = 10
 
         let keyRow = NSStackView(views: [keyValueLabel, learnKeyButton])
         keyRow.orientation = .horizontal
         keyRow.alignment = .centerY
         keyRow.spacing = 12
 
-        let actionRow = NSStackView(views: [testButton, copyLatestButton, historyButton])
-        actionRow.orientation = .horizontal
-        actionRow.spacing = 10
+        let testRow = NSStackView(views: [testButton, resultLabel])
+        testRow.orientation = .horizontal
+        testRow.alignment = .centerY
+        testRow.spacing = 14
+
+        let advancedActionRow = NSStackView(views: [copyLatestButton, historyButton, updateButton])
+        advancedActionRow.orientation = .horizontal
+        advancedActionRow.spacing = 10
+
+        advancedStack.orientation = .vertical
+        advancedStack.alignment = .leading
+        advancedStack.spacing = 10
+        advancedStack.addArrangedSubview(advancedActionRow)
+        advancedStack.isHidden = true
+
+        advancedButton.title = "Erweiterte Einstellungen anzeigen"
+        advancedButton.target = self
+        advancedButton.action = #selector(toggleAdvancedSettings)
+        advancedButton.bezelStyle = .inline
+        advancedButton.font = .systemFont(ofSize: 13, weight: .medium)
+        advancedButton.contentTintColor = .secondaryLabelColor
+        advancedButton.imagePosition = .imageLeading
+        advancedButton.image = NSImage(
+            systemSymbolName: "chevron.right",
+            accessibilityDescription: nil
+        )
+
+        let speakingSection = NSStackView(views: [
+            settingRow(label: "Sprechtaste", control: keyRow),
+            settingRow(label: "Mikrofon", control: microphonePopup),
+            settingRow(label: "Sprachmodell", control: modelPopup)
+        ])
+        speakingSection.orientation = .vertical
+        speakingSection.alignment = .leading
+        speakingSection.spacing = 10
+
+        let permissionsSection = NSStackView(views: [
+            microphonePermissionRow,
+            accessibilityPermissionRow
+        ])
+        permissionsSection.orientation = .vertical
+        permissionsSection.alignment = .leading
+        permissionsSection.spacing = 8
 
         let stack = NSStackView(views: [
-            icon, title, subtitle, keyLabel, keyRow, modelLabel, modelPopup,
-            microphoneLabel, microphonePopup, actionRow, resultLabel,
-            downloadProgress, retryDownloadButton, permissionsLabel,
-            statusLabel, buttonRow
+            header,
+            statusSurface,
+            sectionLabel("SPRECHEN"),
+            speakingSection,
+            divider(),
+            sectionLabel("TEST"),
+            testRow,
+            downloadProgress,
+            retryDownloadButton,
+            divider(),
+            sectionLabel("BERECHTIGUNGEN"),
+            permissionsSection,
+            advancedButton,
+            advancedStack
         ])
         stack.orientation = .vertical
         stack.alignment = .leading
@@ -945,14 +1055,97 @@ private final class SettingsWindowController: NSWindowController {
             stack.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 28),
             stack.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -28),
             stack.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 24),
-            icon.widthAnchor.constraint(equalToConstant: 56),
-            icon.heightAnchor.constraint(equalToConstant: 56),
-            keyValueLabel.widthAnchor.constraint(equalToConstant: 190),
-            modelPopup.widthAnchor.constraint(equalToConstant: 360),
-            microphonePopup.widthAnchor.constraint(equalToConstant: 360),
-            downloadProgress.widthAnchor.constraint(equalToConstant: 360),
-            resultLabel.widthAnchor.constraint(equalToConstant: 460)
+            stack.bottomAnchor.constraint(lessThanOrEqualTo: contentView.bottomAnchor, constant: -22),
+            header.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            statusSurface.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            speakingSection.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            testRow.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            permissionsSection.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            icon.widthAnchor.constraint(equalToConstant: 44),
+            icon.heightAnchor.constraint(equalToConstant: 44),
+            keyValueLabel.widthAnchor.constraint(equalToConstant: 250),
+            modelPopup.widthAnchor.constraint(equalToConstant: 330),
+            microphonePopup.widthAnchor.constraint(equalToConstant: 330),
+            downloadProgress.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            resultLabel.widthAnchor.constraint(equalToConstant: 330)
         ])
+
+        setActivity(.ready(keyTitle: selectedKey.title))
+        setPermissionsStatus(microphoneAllowed: false, accessibilityAllowed: false)
+    }
+
+    private func sectionLabel(_ text: String) -> NSTextField {
+        let label = NSTextField(labelWithString: text)
+        label.font = .systemFont(ofSize: 11, weight: .semibold)
+        label.textColor = .tertiaryLabelColor
+        return label
+    }
+
+    private func divider() -> NSBox {
+        let divider = NSBox()
+        divider.boxType = .separator
+        return divider
+    }
+
+    private func settingRow(label title: String, control: NSView) -> NSStackView {
+        let label = NSTextField(labelWithString: title)
+        label.font = .systemFont(ofSize: 13, weight: .medium)
+        label.textColor = .secondaryLabelColor
+        label.widthAnchor.constraint(equalToConstant: 110).isActive = true
+
+        let row = NSStackView(views: [label, control])
+        row.orientation = .horizontal
+        row.alignment = .centerY
+        row.spacing = 14
+        return row
+    }
+
+    private func permissionRow(
+        symbol: NSImageView,
+        label: NSTextField,
+        button: NSButton
+    ) -> NSStackView {
+        symbol.imageScaling = .scaleProportionallyUpOrDown
+        label.font = .systemFont(ofSize: 13, weight: .medium)
+        label.widthAnchor.constraint(equalToConstant: 360).isActive = true
+        symbol.widthAnchor.constraint(equalToConstant: 18).isActive = true
+        symbol.heightAnchor.constraint(equalToConstant: 18).isActive = true
+
+        let row = NSStackView(views: [symbol, label, button])
+        row.orientation = .horizontal
+        row.alignment = .centerY
+        row.spacing = 10
+        return row
+    }
+
+    private static func configurePermission(
+        allowed: Bool,
+        symbol: NSImageView,
+        label: NSTextField,
+        button: NSButton
+    ) {
+        symbol.image = NSImage(
+            systemSymbolName: allowed ? "checkmark.circle.fill" : "exclamationmark.circle.fill",
+            accessibilityDescription: nil
+        )
+        symbol.contentTintColor = allowed ? .systemGreen : .systemOrange
+        label.textColor = allowed ? .labelColor : .secondaryLabelColor
+        button.isHidden = allowed
+    }
+
+    private static func color(for tone: ActivityTone) -> NSColor {
+        switch tone {
+        case .neutral:
+            return .secondaryLabelColor
+        case .accent:
+            return .systemMint
+        case .recording:
+            return .systemRed
+        case .success:
+            return .systemGreen
+        case .warning:
+            return .systemOrange
+        }
     }
 
     @objc private func modelSelectionChanged() {
@@ -1016,6 +1209,28 @@ private final class SettingsWindowController: NSWindowController {
             NSWorkspace.shared.open(url)
         } else {
             onCheckForUpdates()
+        }
+    }
+
+    @objc private func toggleAdvancedSettings() {
+        isAdvancedVisible.toggle()
+        advancedStack.isHidden = !isAdvancedVisible
+        advancedButton.title = isAdvancedVisible
+            ? "Erweiterte Einstellungen ausblenden"
+            : "Erweiterte Einstellungen anzeigen"
+        advancedButton.image = NSImage(
+            systemSymbolName: isAdvancedVisible ? "chevron.down" : "chevron.right",
+            accessibilityDescription: nil
+        )
+
+        guard let window else { return }
+        var frame = window.frame
+        let heightChange: CGFloat = isAdvancedVisible ? 64 : -64
+        frame.origin.y -= heightChange
+        frame.size.height += heightChange
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.18
+            window.animator().setFrame(frame, display: true)
         }
     }
 
@@ -1159,6 +1374,300 @@ private final class SettingsWindowController: NSWindowController {
         )!
         NSWorkspace.shared.open(url)
     }
+
+    @objc private func openMicrophoneSettings() {
+        let url = URL(
+            string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone"
+        )!
+        NSWorkspace.shared.open(url)
+    }
+}
+
+@MainActor
+private final class OnboardingWindowController: NSWindowController {
+    private let progressIndicator = NSProgressIndicator()
+    private let progressLabel = NSTextField(labelWithString: "")
+    private let microphoneSymbol = NSImageView()
+    private let microphoneDetail = NSTextField(labelWithString: "Mikrofonzugriff erlauben")
+    private let microphoneButton = NSButton()
+    private let accessibilitySymbol = NSImageView()
+    private let accessibilityDetail = NSTextField(labelWithString: "Bedienungshilfen erlauben")
+    private let accessibilityButton = NSButton()
+    private let modelSymbol = NSImageView()
+    private let modelDetail = NSTextField(labelWithString: "Sprachmodell herunterladen")
+    private let modelButton = NSButton()
+    private let testSymbol = NSImageView()
+    private let testDetail = NSTextField(labelWithString: "Kurze Testaufnahme durchführen")
+    private let testButton = NSButton()
+    private let finishButton = NSButton()
+    private let onRequestMicrophone: () -> Void
+    private let onRequestAccessibility: () -> Void
+    private let onInstallModel: () -> Void
+    private let onTestRecording: () -> Void
+    private let onFinish: () -> Void
+    private let onSkip: () -> Void
+
+    init(
+        onRequestMicrophone: @escaping () -> Void,
+        onRequestAccessibility: @escaping () -> Void,
+        onInstallModel: @escaping () -> Void,
+        onTestRecording: @escaping () -> Void,
+        onFinish: @escaping () -> Void,
+        onSkip: @escaping () -> Void
+    ) {
+        self.onRequestMicrophone = onRequestMicrophone
+        self.onRequestAccessibility = onRequestAccessibility
+        self.onInstallModel = onInstallModel
+        self.onTestRecording = onTestRecording
+        self.onFinish = onFinish
+        self.onSkip = onSkip
+
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 520, height: 460),
+            styleMask: [.titled, .closable],
+            backing: .buffered,
+            defer: false
+        )
+        window.title = "Local Flow einrichten"
+        window.center()
+        window.isReleasedWhenClosed = false
+
+        super.init(window: window)
+        configureContent()
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    func show() {
+        showWindow(nil)
+        NSApp.activate(ignoringOtherApps: true)
+        window?.makeKeyAndOrderFront(nil)
+    }
+
+    func setProgress(_ progress: OnboardingProgress) {
+        progressIndicator.doubleValue = Double(progress.completedStepCount)
+        progressLabel.stringValue = "\(progress.completedStepCount) von 4 Schritten abgeschlossen"
+
+        configureStep(
+            completed: progress.microphoneAllowed,
+            symbol: microphoneSymbol,
+            detail: microphoneDetail,
+            button: microphoneButton,
+            completedText: "Mikrofon ist bereit"
+        )
+        configureStep(
+            completed: progress.accessibilityAllowed,
+            symbol: accessibilitySymbol,
+            detail: accessibilityDetail,
+            button: accessibilityButton,
+            completedText: "Bedienungshilfen sind bereit"
+        )
+        configureStep(
+            completed: progress.modelInstalled,
+            symbol: modelSymbol,
+            detail: modelDetail,
+            button: modelButton,
+            completedText: "Sprachmodell ist bereit"
+        )
+        configureStep(
+            completed: progress.testRecordingCompleted,
+            symbol: testSymbol,
+            detail: testDetail,
+            button: testButton,
+            completedText: "Testaufnahme abgeschlossen"
+        )
+
+        testButton.isEnabled = progress.microphoneAllowed && progress.modelInstalled
+        finishButton.isEnabled = progress.canFinish
+    }
+
+    func setModelProgress(_ progress: ModelDownloadProgress?) {
+        guard let progress else { return }
+        modelDetail.stringValue = progress.percentage.map {
+            "Sprachmodell wird geladen · \($0) %"
+        } ?? "Sprachmodell wird geladen"
+        modelButton.isEnabled = false
+    }
+
+    func setTestRunning(_ running: Bool) {
+        testButton.isEnabled = !running
+        testDetail.stringValue = running
+            ? "Testaufnahme läuft …"
+            : "Kurze Testaufnahme durchführen"
+    }
+
+    private func configureContent() {
+        guard let contentView = window?.contentView else { return }
+
+        let icon = NSImageView(image: NSApp.applicationIconImage)
+        icon.imageScaling = .scaleProportionallyUpOrDown
+
+        let title = NSTextField(labelWithString: "Local Flow einrichten")
+        title.font = .systemFont(ofSize: 24, weight: .bold)
+
+        let subtitle = NSTextField(
+            wrappingLabelWithString: "Vier kurze Schritte, danach läuft die Spracheingabe vollständig lokal auf diesem Mac."
+        )
+        subtitle.textColor = .secondaryLabelColor
+
+        progressIndicator.minValue = 0
+        progressIndicator.maxValue = 4
+        progressIndicator.style = .bar
+        progressIndicator.controlSize = .small
+        progressLabel.font = .systemFont(ofSize: 12)
+        progressLabel.textColor = .secondaryLabelColor
+
+        microphoneButton.title = "Erlauben"
+        microphoneButton.target = self
+        microphoneButton.action = #selector(requestMicrophone)
+        microphoneButton.bezelStyle = .rounded
+
+        accessibilityButton.title = "Öffnen"
+        accessibilityButton.target = self
+        accessibilityButton.action = #selector(requestAccessibility)
+        accessibilityButton.bezelStyle = .rounded
+
+        modelButton.title = "Herunterladen"
+        modelButton.target = self
+        modelButton.action = #selector(installModel)
+        modelButton.bezelStyle = .rounded
+
+        testButton.title = "Testen"
+        testButton.target = self
+        testButton.action = #selector(runTestRecording)
+        testButton.bezelStyle = .rounded
+
+        let steps = NSStackView(views: [
+            stepRow(number: 1, symbol: microphoneSymbol, detail: microphoneDetail, button: microphoneButton),
+            stepRow(number: 2, symbol: accessibilitySymbol, detail: accessibilityDetail, button: accessibilityButton),
+            stepRow(number: 3, symbol: modelSymbol, detail: modelDetail, button: modelButton),
+            stepRow(number: 4, symbol: testSymbol, detail: testDetail, button: testButton)
+        ])
+        steps.orientation = .vertical
+        steps.alignment = .leading
+        steps.spacing = 14
+
+        finishButton.title = "Local Flow verwenden"
+        finishButton.target = self
+        finishButton.action = #selector(finish)
+        finishButton.bezelStyle = .rounded
+        finishButton.keyEquivalent = "\r"
+        finishButton.contentTintColor = .systemMint
+        finishButton.bezelColor = .systemMint
+        finishButton.isEnabled = false
+
+        let skipButton = NSButton(
+            title: "Später einrichten",
+            target: self,
+            action: #selector(skip)
+        )
+        skipButton.bezelStyle = .rounded
+
+        let buttonRow = NSStackView(views: [skipButton, finishButton])
+        buttonRow.orientation = .horizontal
+        buttonRow.alignment = .centerY
+        buttonRow.spacing = 10
+
+        let stack = NSStackView(views: [
+            icon,
+            title,
+            subtitle,
+            progressIndicator,
+            progressLabel,
+            steps,
+            buttonRow
+        ])
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 12
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        contentView.addSubview(stack)
+
+        NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 30),
+            stack.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -30),
+            stack.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 26),
+            stack.bottomAnchor.constraint(lessThanOrEqualTo: contentView.bottomAnchor, constant: -24),
+            icon.widthAnchor.constraint(equalToConstant: 52),
+            icon.heightAnchor.constraint(equalToConstant: 52),
+            subtitle.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            progressIndicator.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            steps.widthAnchor.constraint(equalTo: stack.widthAnchor)
+        ])
+
+        setProgress(OnboardingProgress())
+    }
+
+    private func stepRow(
+        number: Int,
+        symbol: NSImageView,
+        detail: NSTextField,
+        button: NSButton
+    ) -> NSStackView {
+        let numberLabel = NSTextField(labelWithString: "\(number)")
+        numberLabel.font = .monospacedDigitSystemFont(ofSize: 12, weight: .semibold)
+        numberLabel.alignment = .center
+        numberLabel.textColor = .secondaryLabelColor
+        numberLabel.widthAnchor.constraint(equalToConstant: 20).isActive = true
+
+        symbol.imageScaling = .scaleProportionallyUpOrDown
+        symbol.widthAnchor.constraint(equalToConstant: 20).isActive = true
+        symbol.heightAnchor.constraint(equalToConstant: 20).isActive = true
+        detail.font = .systemFont(ofSize: 13, weight: .medium)
+        detail.widthAnchor.constraint(equalToConstant: 300).isActive = true
+
+        let row = NSStackView(views: [numberLabel, symbol, detail, button])
+        row.orientation = .horizontal
+        row.alignment = .centerY
+        row.spacing = 10
+        return row
+    }
+
+    private func configureStep(
+        completed: Bool,
+        symbol: NSImageView,
+        detail: NSTextField,
+        button: NSButton,
+        completedText: String
+    ) {
+        symbol.image = NSImage(
+            systemSymbolName: completed ? "checkmark.circle.fill" : "circle",
+            accessibilityDescription: nil
+        )
+        symbol.contentTintColor = completed ? .systemGreen : .tertiaryLabelColor
+        if completed {
+            detail.stringValue = completedText
+        }
+        button.isHidden = completed
+        button.isEnabled = true
+    }
+
+    @objc private func requestMicrophone() {
+        onRequestMicrophone()
+    }
+
+    @objc private func requestAccessibility() {
+        onRequestAccessibility()
+    }
+
+    @objc private func installModel() {
+        onInstallModel()
+    }
+
+    @objc private func runTestRecording() {
+        onTestRecording()
+    }
+
+    @objc private func finish() {
+        onFinish()
+    }
+
+    @objc private func skip() {
+        onSkip()
+    }
 }
 
 @MainActor
@@ -1167,6 +1676,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
     private static let whisperModelDefaultsKey = "whisperModel"
     private static let microphoneSelectionDefaultsKey = "microphoneSelection"
     private static let transcriptHistoryDefaultsKey = "transcriptHistory"
+    private static let onboardingCompletedDefaultsKey = "onboardingCompleted"
 
     private enum TranscriptionDestination {
         case paste
@@ -1176,6 +1686,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
     private let recorder = AudioRecorder()
     private var hotkeyMonitor: PushToTalkMonitor?
     private var settingsWindowController: SettingsWindowController?
+    private var onboardingWindowController: OnboardingWindowController?
     private var statusItem: NSStatusItem!
     private var statusMenuItem: NSMenuItem!
     private var copyLatestMenuItem: NSMenuItem!
@@ -1188,6 +1699,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
     private var transcriptHistory = TranscriptHistory()
     private var isTestRecording = false
     private var isInstallingModel = false
+    private var onboardingTestCompleted = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         selectedKey = PushToTalkKey(
@@ -1211,7 +1723,6 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
             ) ?? []
         )
         configureStatusItem()
-        TextInserter.promptForAccessibility()
 
         hotkeyMonitor = PushToTalkMonitor(
             key: selectedKey,
@@ -1220,16 +1731,27 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         )
         hotkeyMonitor?.start()
         configureSettingsWindow()
+        configureOnboardingWindow()
         updateTranscriptHistoryViews()
-        settingsWindowController?.show()
         refreshPermissions()
+        refreshOnboarding()
+
+        if UserDefaults.standard.bool(forKey: Self.onboardingCompletedDefaultsKey) {
+            settingsWindowController?.show()
+        } else {
+            onboardingWindowController?.show()
+        }
+
         Task {
-            _ = await AVCaptureDevice.requestAccess(for: .audio)
-            refreshPermissions()
             settingsWindowController?.refreshMicrophones(selected: selectedMicrophone)
             await installSelectedModelIfNeeded()
             await checkForUpdates(showCurrentResult: false)
         }
+    }
+
+    func applicationDidBecomeActive(_ notification: Notification) {
+        refreshPermissions()
+        refreshOnboarding()
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
@@ -1319,6 +1841,65 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         )
     }
 
+    private func configureOnboardingWindow() {
+        onboardingWindowController = OnboardingWindowController(
+            onRequestMicrophone: { [weak self] in
+                Task {
+                    _ = await AVCaptureDevice.requestAccess(for: .audio)
+                    await MainActor.run {
+                        self?.refreshPermissions()
+                        self?.refreshOnboarding()
+                        self?.settingsWindowController?.refreshMicrophones(
+                            selected: self?.selectedMicrophone ?? .systemDefault
+                        )
+                    }
+                }
+            },
+            onRequestAccessibility: { [weak self] in
+                TextInserter.promptForAccessibility()
+                self?.openAccessibilitySettings()
+            },
+            onInstallModel: { [weak self] in
+                Task { await self?.installSelectedModelIfNeeded() }
+            },
+            onTestRecording: { [weak self] in
+                self?.beginTestRecording()
+            },
+            onFinish: { [weak self] in
+                UserDefaults.standard.set(
+                    true,
+                    forKey: Self.onboardingCompletedDefaultsKey
+                )
+                self?.onboardingWindowController?.close()
+                self?.settingsWindowController?.show()
+            },
+            onSkip: { [weak self] in
+                self?.onboardingWindowController?.close()
+                self?.settingsWindowController?.show()
+            }
+        )
+    }
+
+    private func currentOnboardingProgress() -> OnboardingProgress {
+        OnboardingProgress(
+            microphoneAllowed: AVCaptureDevice.authorizationStatus(for: .audio) == .authorized,
+            accessibilityAllowed: AXIsProcessTrusted(),
+            modelInstalled: ModelInstaller.isInstalled(selectedModel),
+            testRecordingCompleted: onboardingTestCompleted
+        )
+    }
+
+    private func refreshOnboarding() {
+        onboardingWindowController?.setProgress(currentOnboardingProgress())
+    }
+
+    private func openAccessibilitySettings() {
+        let url = URL(
+            string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"
+        )!
+        NSWorkspace.shared.open(url)
+    }
+
     private func changePushToTalkKey(to key: PushToTalkKey) {
         selectedKey = key
         UserDefaults.standard.set(key.rawValue, forKey: Self.pushToTalkKeyDefaultsKey)
@@ -1384,6 +1965,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         isTestRecording = true
         settingsWindowController?.setTestRecordingEnabled(false)
         settingsWindowController?.setTestResult("Testaufnahme läuft …")
+        onboardingWindowController?.setTestRunning(true)
         updateStatus("Testaufnahme läuft …", symbol: "waveform.circle.fill")
 
         Task {
@@ -1395,6 +1977,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
                 isTestRecording = false
                 recorder.cancel()
                 settingsWindowController?.setTestRecordingEnabled(true)
+                onboardingWindowController?.setTestRunning(false)
                 show(error)
             }
         }
@@ -1441,6 +2024,8 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
                 updateStatus("Eingefügt", symbol: "checkmark.circle.fill")
             case .test:
                 settingsWindowController?.setTestResult(transcript)
+                onboardingTestCompleted = true
+                refreshOnboarding()
                 updateStatus("Test fertig", symbol: "checkmark.circle.fill")
             }
             resetStatusSoon()
@@ -1456,6 +2041,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         case .test:
             isTestRecording = false
             settingsWindowController?.setTestRecordingEnabled(true)
+            onboardingWindowController?.setTestRunning(false)
         }
     }
 
@@ -1523,6 +2109,9 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         settingsWindowController?.setModelDownloadProgress(
             ModelDownloadProgress(receivedBytes: 0, totalBytes: nil)
         )
+        onboardingWindowController?.setModelProgress(
+            ModelDownloadProgress(receivedBytes: 0, totalBytes: nil)
+        )
         updateStatus(
             "Lade \(model.title) einmalig herunter …",
             symbol: "arrow.down.circle"
@@ -1532,6 +2121,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
             try await ModelInstaller.install(model) { [weak self] progress in
                 Task { @MainActor in
                     self?.settingsWindowController?.setModelDownloadProgress(progress)
+                    self?.onboardingWindowController?.setModelProgress(progress)
                     if let percentage = progress.percentage {
                         self?.updateStatus(
                             "Lade \(model.title): \(percentage) %",
@@ -1541,15 +2131,18 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
                 }
             }
             settingsWindowController?.setModelDownloadProgress(nil)
+            refreshOnboarding()
             updateStatus("Sprachmodell ist bereit", symbol: "checkmark.circle.fill")
             resetStatusSoon()
         } catch {
             settingsWindowController?.setModelDownloadFailed()
+            refreshOnboarding()
             show(error)
         }
 
         isInstallingModel = false
         settingsWindowController?.setTestRecordingEnabled(true)
+        refreshOnboarding()
 
         if selectedModel != model {
             await installSelectedModelIfNeeded()
@@ -1612,12 +2205,65 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func updateStatus(_ text: String, symbol: String) {
+        let activity: LocalFlowActivity
+        switch symbol {
+        case "waveform.circle.fill":
+            activity = text.hasPrefix("Test") ? .testRecording : .recording
+        case "ellipsis.circle":
+            activity = .processing
+        case "arrow.down.circle":
+            let percentage = text
+                .split(separator: " ")
+                .compactMap { Int($0) }
+                .last
+            activity = .downloadingModel(percentage)
+        case let value where value.contains("checkmark"):
+            activity = .success(text)
+        case let value where value.contains("exclamationmark"):
+            activity = .failure(text)
+        default:
+            activity = .ready(keyTitle: selectedKey.title)
+        }
+
         statusMenuItem.title = text
-        settingsWindowController?.setStatus(text)
+        settingsWindowController?.setActivity(activity)
         statusItem.button?.image = NSImage(
-            systemSymbolName: symbol,
-            accessibilityDescription: text
+            systemSymbolName: activity.symbolName,
+            accessibilityDescription: activity.title
         )
+        statusItem.button?.contentTintColor = statusColor(for: activity.tone)
+        updateStatusItemPulse(activity.isPulsing)
+    }
+
+    private func statusColor(for tone: ActivityTone) -> NSColor {
+        switch tone {
+        case .neutral:
+            return .labelColor
+        case .accent:
+            return .systemMint
+        case .recording:
+            return .systemRed
+        case .success:
+            return .systemGreen
+        case .warning:
+            return .systemOrange
+        }
+    }
+
+    private func updateStatusItemPulse(_ pulsing: Bool) {
+        guard let button = statusItem.button else { return }
+        button.wantsLayer = true
+        button.layer?.removeAnimation(forKey: "localFlowPulse")
+        button.layer?.opacity = 1
+        guard pulsing else { return }
+
+        let animation = CABasicAnimation(keyPath: "opacity")
+        animation.fromValue = 1
+        animation.toValue = 0.35
+        animation.duration = 0.55
+        animation.autoreverses = true
+        animation.repeatCount = .infinity
+        button.layer?.add(animation, forKey: "localFlowPulse")
     }
 
     private func refreshPermissions() {

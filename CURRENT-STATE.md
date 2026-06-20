@@ -56,6 +56,13 @@ older Local Flow installations remain usable.
 ## Release State
 
 - Portable bundle no longer requires Homebrew on the recipient Mac.
+- The native settings UI is organized around a live activity status, compact
+  speaking controls, a primary recording test, permission health and a
+  collapsible advanced area.
+- First launch uses a four-step onboarding assistant for microphone,
+  accessibility, model installation and a test recording.
+- The menu-bar icon changes color and symbol with ready, recording,
+  processing, download, success and error states, and pulses while recording.
 - DMG generation is implemented.
 - The DMG uses a fixed compact 660 x 540 Finder layout with a branded
   background, drag arrow and German installation instruction.

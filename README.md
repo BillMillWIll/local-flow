@@ -35,6 +35,9 @@ to a transcription API.
 - local history of the last five transcripts
 - automatic paste with clipboard restoration
 - automatic update check with a direct link to the newest GitHub release
+- guided four-step first-run setup
+- compact native settings window with live recording and processing status
+- dynamic menu-bar feedback while recording and transcribing
 - native application icon
 
 ## Requirements

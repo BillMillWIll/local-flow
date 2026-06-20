@@ -1,5 +1,143 @@
 import Foundation
 
+public enum ActivityTone: Equatable, Sendable {
+    case neutral
+    case accent
+    case recording
+    case success
+    case warning
+}
+
+public enum LocalFlowActivity: Equatable, Sendable {
+    case ready(keyTitle: String)
+    case recording
+    case testRecording
+    case processing
+    case downloadingModel(Int?)
+    case success(String)
+    case failure(String)
+
+    public var title: String {
+        switch self {
+        case .ready:
+            return "Bereit"
+        case .recording:
+            return "Aufnahme läuft"
+        case .testRecording:
+            return "Testaufnahme läuft"
+        case .processing:
+            return "Wird transkribiert"
+        case .downloadingModel(let percentage):
+            guard let percentage else { return "Sprachmodell wird geladen" }
+            return "Sprachmodell wird geladen · \(percentage) %"
+        case .success(let message), .failure(let message):
+            return message
+        }
+    }
+
+    public var detail: String {
+        switch self {
+        case .ready(let keyTitle):
+            return "\(keyTitle) halten und sprechen"
+        case .recording:
+            return "Loslassen, um den Text einzufügen"
+        case .testRecording:
+            return "Vier Sekunden sprechen"
+        case .processing:
+            return "Die Aufnahme wird lokal verarbeitet"
+        case .downloadingModel:
+            return "Einmaliger Download für lokale Transkription"
+        case .success:
+            return "Local Flow ist bereit"
+        case .failure:
+            return "Bitte Einstellung oder Berechtigung prüfen"
+        }
+    }
+
+    public var symbolName: String {
+        switch self {
+        case .ready:
+            return "mic.fill"
+        case .recording, .testRecording:
+            return "waveform.circle.fill"
+        case .processing:
+            return "ellipsis.circle.fill"
+        case .downloadingModel:
+            return "arrow.down.circle.fill"
+        case .success:
+            return "checkmark.circle.fill"
+        case .failure:
+            return "exclamationmark.triangle.fill"
+        }
+    }
+
+    public var tone: ActivityTone {
+        switch self {
+        case .ready:
+            return .neutral
+        case .recording, .testRecording:
+            return .recording
+        case .processing, .downloadingModel:
+            return .accent
+        case .success:
+            return .success
+        case .failure:
+            return .warning
+        }
+    }
+
+    public var isPulsing: Bool {
+        self == .recording || self == .testRecording
+    }
+}
+
+public enum OnboardingStep: CaseIterable, Equatable, Sendable {
+    case microphone
+    case accessibility
+    case model
+    case testRecording
+}
+
+public struct OnboardingProgress: Equatable, Sendable {
+    public var microphoneAllowed: Bool
+    public var accessibilityAllowed: Bool
+    public var modelInstalled: Bool
+    public var testRecordingCompleted: Bool
+
+    public init(
+        microphoneAllowed: Bool = false,
+        accessibilityAllowed: Bool = false,
+        modelInstalled: Bool = false,
+        testRecordingCompleted: Bool = false
+    ) {
+        self.microphoneAllowed = microphoneAllowed
+        self.accessibilityAllowed = accessibilityAllowed
+        self.modelInstalled = modelInstalled
+        self.testRecordingCompleted = testRecordingCompleted
+    }
+
+    public var completedStepCount: Int {
+        [
+            microphoneAllowed,
+            accessibilityAllowed,
+            modelInstalled,
+            testRecordingCompleted
+        ].filter { $0 }.count
+    }
+
+    public var nextStep: OnboardingStep? {
+        if !microphoneAllowed { return .microphone }
+        if !accessibilityAllowed { return .accessibility }
+        if !modelInstalled { return .model }
+        if !testRecordingCompleted { return .testRecording }
+        return nil
+    }
+
+    public var canFinish: Bool {
+        nextStep == nil
+    }
+}
+
 public enum WhisperModel: String, CaseIterable, Sendable {
     public static let repositoryRevision = "5359861c739e955e79d9a303bcbc70fb988958b1"
 
