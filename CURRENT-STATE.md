@@ -1,6 +1,6 @@
 # Current State
 
-Updated: 20 June 2026
+Updated: 23 June 2026
 
 This is the first file to read in a new session before changing Local Flow.
 Repository-wide AI instructions and the mandatory release workflow are defined
@@ -63,6 +63,15 @@ older Local Flow installations remain usable.
   collapsible advanced area.
 - First launch uses a four-step onboarding assistant for microphone,
   accessibility, model installation and a test recording.
+- Failed model downloads return the onboarding assistant to an explicit retry
+  state instead of leaving it stuck on a loading message.
+- Manual microphone selections use a versioned, delimiter-safe stored format;
+  legacy selections remain readable.
+- Temporary microphone switching is rolled back even when recorder setup
+  fails.
+- Automatic text insertion restores the previous clipboard only while Local
+  Flow still owns the temporary clipboard contents, so newer user copies are
+  preserved.
 - The menu-bar icon changes color and symbol with ready, recording,
   processing, download, success and error states, and pulses while recording.
 - DMG generation is implemented.

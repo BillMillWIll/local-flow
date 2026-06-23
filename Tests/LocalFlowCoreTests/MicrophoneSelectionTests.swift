@@ -16,7 +16,8 @@ import Testing
         name: "MacBook Pro Mikrofon"
     )
 
-    #expect(selection.rawValue == "manual:BuiltInMicDevice:MacBook Pro Mikrofon")
+    #expect(selection.rawValue.hasPrefix("manual-v2:"))
+    #expect(MicrophoneSelection(savedValue: selection.rawValue) == selection)
     #expect(selection.title == "MacBook Pro Mikrofon")
     #expect(selection.deviceID == "BuiltInMicDevice")
 }
@@ -28,6 +29,15 @@ import Testing
 
     #expect(selection == .manual(deviceID: "AirPods123", name: "AirPods von Bill"))
     #expect(selection.deviceID == "AirPods123")
+}
+
+@Test func roundTripsManualMicrophoneSelectionContainingColons() {
+    let selection = MicrophoneSelection.manual(
+        deviceID: "AppleUSBAudioEngine:Vendor:Product:UID",
+        name: "Studio: Mikrofon"
+    )
+
+    #expect(MicrophoneSelection(savedValue: selection.rawValue) == selection)
 }
 
 @Test func fallsBackToSystemDefaultForInvalidMicrophoneSelection() {

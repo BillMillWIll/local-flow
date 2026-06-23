@@ -256,7 +256,7 @@ private enum UpdateChecker {
 @MainActor
 private final class AudioRecorder {
     private var recorder: AVAudioRecorder?
-    private var previousDefaultInputDeviceID: AudioDeviceID?
+    private var inputDeviceRestoration = TemporaryValueRestoration<AudioDeviceID>()
 
     func start(microphone: MicrophoneSelection) async throws {
         guard await AVCaptureDevice.requestAccess(for: .audio) else {
@@ -267,25 +267,29 @@ private final class AudioRecorder {
             try switchDefaultInputDevice(to: deviceID)
         }
 
-        let url = Self.recordingURL
-        try? FileManager.default.removeItem(at: url)
+        do {
+            let url = Self.recordingURL
+            try? FileManager.default.removeItem(at: url)
 
-        let settings: [String: Any] = [
-            AVFormatIDKey: kAudioFormatLinearPCM,
-            AVSampleRateKey: 16_000,
-            AVNumberOfChannelsKey: 1,
-            AVLinearPCMBitDepthKey: 16,
-            AVLinearPCMIsFloatKey: false,
-            AVLinearPCMIsBigEndianKey: false
-        ]
+            let settings: [String: Any] = [
+                AVFormatIDKey: kAudioFormatLinearPCM,
+                AVSampleRateKey: 16_000,
+                AVNumberOfChannelsKey: 1,
+                AVLinearPCMBitDepthKey: 16,
+                AVLinearPCMIsFloatKey: false,
+                AVLinearPCMIsBigEndianKey: false
+            ]
 
-        let recorder = try AVAudioRecorder(url: url, settings: settings)
-        recorder.prepareToRecord()
-        guard recorder.record() else {
+            let recorder = try AVAudioRecorder(url: url, settings: settings)
+            recorder.prepareToRecord()
+            guard recorder.record() else {
+                throw LocalFlowError.recordingFailed
+            }
+            self.recorder = recorder
+        } catch {
             restoreDefaultInputDevice()
-            throw LocalFlowError.recordingFailed
+            throw error
         }
-        self.recorder = recorder
     }
 
     func stop() throws -> URL {
@@ -310,7 +314,7 @@ private final class AudioRecorder {
         }
 
         let currentDeviceID = try Self.defaultInputDeviceID()
-        previousDefaultInputDeviceID = currentDeviceID
+        inputDeviceRestoration.remember(currentDeviceID)
 
         var address = AudioObjectPropertyAddress(
             mSelector: kAudioHardwarePropertyDefaultInputDevice,
@@ -327,14 +331,15 @@ private final class AudioRecorder {
         )
 
         if status != noErr {
-            previousDefaultInputDeviceID = nil
+            _ = inputDeviceRestoration.takeRememberedValue()
             throw LocalFlowError.recordingFailed
         }
     }
 
     private func restoreDefaultInputDevice() {
-        guard var deviceID = previousDefaultInputDeviceID else { return }
-        previousDefaultInputDeviceID = nil
+        guard var deviceID = inputDeviceRestoration.takeRememberedValue() else {
+            return
+        }
 
         var address = AudioObjectPropertyAddress(
             mSelector: kAudioHardwarePropertyDefaultInputDevice,
@@ -617,6 +622,7 @@ private enum TextInserter {
 
         pasteboard.clearContents()
         pasteboard.setString(text, forType: .string)
+        let temporaryChangeCount = pasteboard.changeCount
 
         let source = CGEventSource(stateID: .hidSystemState)
         let keyDown = CGEvent(
@@ -634,9 +640,15 @@ private enum TextInserter {
         keyDown?.post(tap: .cghidEventTap)
         keyUp?.post(tap: .cghidEventTap)
 
-        guard let snapshot else { return }
         DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
-            let items = snapshot.map { values in
+            guard PasteboardRestoration.shouldRestore(
+                expectedChangeCount: temporaryChangeCount,
+                currentChangeCount: pasteboard.changeCount
+            ) else {
+                return
+            }
+
+            let items = (snapshot ?? []).map { values in
                 let item = NSPasteboardItem()
                 for (type, data) in values {
                     item.setData(data, forType: type)
@@ -644,7 +656,9 @@ private enum TextInserter {
                 return item
             }
             pasteboard.clearContents()
-            pasteboard.writeObjects(items)
+            if !items.isEmpty {
+                pasteboard.writeObjects(items)
+            }
         }
     }
 
@@ -1400,6 +1414,7 @@ private final class OnboardingWindowController: NSWindowController {
     private let testDetail = NSTextField(labelWithString: "Kurze Testaufnahme durchführen")
     private let testButton = NSButton()
     private let finishButton = NSButton()
+    private var modelPresentation = ModelInstallationPresentation.missing
     private let onRequestMicrophone: () -> Void
     private let onRequestAccessibility: () -> Void
     private let onInstallModel: () -> Void
@@ -1472,6 +1487,12 @@ private final class OnboardingWindowController: NSWindowController {
             button: modelButton,
             completedText: "Sprachmodell ist bereit"
         )
+        if progress.modelInstalled {
+            modelPresentation = .installed
+        } else if modelPresentation == .installed {
+            modelPresentation = .missing
+        }
+        applyModelPresentation()
         configureStep(
             completed: progress.testRecordingCompleted,
             symbol: testSymbol,
@@ -1486,10 +1507,13 @@ private final class OnboardingWindowController: NSWindowController {
 
     func setModelProgress(_ progress: ModelDownloadProgress?) {
         guard let progress else { return }
-        modelDetail.stringValue = progress.percentage.map {
-            "Sprachmodell wird geladen · \($0) %"
-        } ?? "Sprachmodell wird geladen"
-        modelButton.isEnabled = false
+        modelPresentation = .installing(progress.percentage)
+        applyModelPresentation()
+    }
+
+    func setModelDownloadFailed() {
+        modelPresentation = .failed
+        applyModelPresentation()
     }
 
     func setTestRunning(_ running: Bool) {
@@ -1645,6 +1669,11 @@ private final class OnboardingWindowController: NSWindowController {
         button.isEnabled = true
     }
 
+    private func applyModelPresentation() {
+        modelDetail.stringValue = modelPresentation.detail
+        modelButton.isEnabled = modelPresentation.isButtonEnabled
+    }
+
     @objc private func requestMicrophone() {
         onRequestMicrophone()
     }
@@ -1700,6 +1729,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
     private var isTestRecording = false
     private var isInstallingModel = false
     private var onboardingTestCompleted = false
+    private var deferredStatusReset = DeferredReset()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         selectedKey = PushToTalkKey(
@@ -2136,6 +2166,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
             resetStatusSoon()
         } catch {
             settingsWindowController?.setModelDownloadFailed()
+            onboardingWindowController?.setModelDownloadFailed()
             refreshOnboarding()
             show(error)
         }
@@ -2205,6 +2236,8 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func updateStatus(_ text: String, symbol: String) {
+        deferredStatusReset.invalidate()
+
         let activity: LocalFlowActivity
         switch symbol {
         case "waveform.circle.fill":
@@ -2274,8 +2307,10 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func resetStatusSoon() {
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
-            self.updateStatus(self.readyText, symbol: "mic")
+        let token = deferredStatusReset.schedule()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
+            guard let self, deferredStatusReset.isCurrent(token) else { return }
+            updateStatus(readyText, symbol: "mic")
         }
     }
 

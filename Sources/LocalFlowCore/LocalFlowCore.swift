@@ -200,6 +200,80 @@ public struct ModelDownloadProgress: Equatable, Sendable {
     }
 }
 
+public enum PasteboardRestoration {
+    public static func shouldRestore(
+        expectedChangeCount: Int,
+        currentChangeCount: Int
+    ) -> Bool {
+        expectedChangeCount == currentChangeCount
+    }
+}
+
+public struct DeferredReset: Sendable {
+    private var generation = 0
+
+    public init() {}
+
+    public mutating func schedule() -> Int {
+        generation += 1
+        return generation
+    }
+
+    public mutating func invalidate() {
+        generation += 1
+    }
+
+    public func isCurrent(_ token: Int) -> Bool {
+        token == generation
+    }
+}
+
+public struct TemporaryValueRestoration<Value: Sendable>: Sendable {
+    private var rememberedValue: Value?
+
+    public init() {}
+
+    public mutating func remember(_ value: Value) {
+        rememberedValue = value
+    }
+
+    public mutating func takeRememberedValue() -> Value? {
+        defer { rememberedValue = nil }
+        return rememberedValue
+    }
+}
+
+public enum ModelInstallationPresentation: Equatable, Sendable {
+    case missing
+    case installing(Int?)
+    case failed
+    case installed
+
+    public var detail: String {
+        switch self {
+        case .missing:
+            return "Sprachmodell herunterladen"
+        case .installing(let percentage):
+            return percentage.map {
+                "Sprachmodell wird geladen · \($0) %"
+            } ?? "Sprachmodell wird geladen"
+        case .failed:
+            return "Download fehlgeschlagen – erneut versuchen"
+        case .installed:
+            return "Sprachmodell ist bereit"
+        }
+    }
+
+    public var isButtonEnabled: Bool {
+        switch self {
+        case .missing, .failed:
+            return true
+        case .installing, .installed:
+            return false
+        }
+    }
+}
+
 public struct AppVersion: Comparable, Sendable {
     public let major: Int
     public let minor: Int
@@ -292,6 +366,17 @@ public enum MicrophoneSelection: Equatable, Sendable {
             return
         }
 
+        if savedValue.hasPrefix("manual-v2:"),
+           let data = Data(
+               base64Encoded: String(savedValue.dropFirst("manual-v2:".count))
+           ),
+           let stored = try? JSONDecoder().decode(StoredMicrophone.self, from: data),
+           !stored.deviceID.isEmpty,
+           !stored.name.isEmpty {
+            self = .manual(deviceID: stored.deviceID, name: stored.name)
+            return
+        }
+
         let parts = savedValue.split(separator: ":", maxSplits: 2).map(String.init)
         guard parts.count == 3, parts[0] == "manual" else {
             self = .systemDefault
@@ -306,7 +391,11 @@ public enum MicrophoneSelection: Equatable, Sendable {
         case .systemDefault:
             return "systemDefault"
         case .manual(let deviceID, let name):
-            return "manual:\(deviceID):\(name)"
+            let stored = StoredMicrophone(deviceID: deviceID, name: name)
+            guard let data = try? JSONEncoder().encode(stored) else {
+                return "systemDefault"
+            }
+            return "manual-v2:\(data.base64EncodedString())"
         }
     }
 
@@ -327,6 +416,11 @@ public enum MicrophoneSelection: Equatable, Sendable {
             return deviceID
         }
     }
+}
+
+private struct StoredMicrophone: Codable {
+    let deviceID: String
+    let name: String
 }
 
 public struct PushToTalkKey: Equatable, Hashable, Sendable {
