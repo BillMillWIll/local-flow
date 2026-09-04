@@ -152,6 +152,26 @@ sed -i '' \
     -e "s/__BUILD_NUMBER__/$BUILD_NUMBER/g" \
     "$CONTENTS_DIR/Info.plist"
 
+# libggml hat den Homebrew-Backend-Ordner fest einkompiliert und durchsucht
+# ihn vor dem eigenen Programmordner. Auf einem Mac mit Homebrew lädt das
+# Bundle sonst fremde Backends und stürzt bei VAD ab (zwei libggml-base im
+# Prozess). Der Pfad wird deshalb im Bundle auf einen nicht existierenden
+# Ordner umgeschrieben; ggml fällt dann auf den Programmordner zurück.
+GGML_BACKEND_DIR_COMPILED="$(cd "$GGML_PREFIX/libexec" && pwd -P)"
+python3 - "$WHISPER_LIB_DIR/libggml.0.dylib" "$GGML_BACKEND_DIR_COMPILED" <<'PY'
+import sys
+path, compiled = sys.argv[1], sys.argv[2].encode()
+data = open(path, "rb").read()
+count = data.count(compiled + b"\0")
+if count != 1:
+    sys.exit(f"Abbruch: Backend-Pfad {compiled!r} {count}x in libggml gefunden, erwartet 1x.")
+replacement = b"/dev/null/local-flow-no-brew"
+if len(replacement) > len(compiled):
+    sys.exit("Abbruch: Ersatzpfad ist länger als der einkompilierte Pfad.")
+data = data.replace(compiled + b"\0", replacement + b"\0" * (len(compiled) - len(replacement) + 1))
+open(path, "wb").write(data)
+PY
+
 codesign --force --sign - "$WHISPER_LIB_DIR/libomp.dylib"
 codesign --force --sign - "$WHISPER_LIB_DIR/libggml-base.0.dylib"
 codesign --force --sign - "$WHISPER_LIB_DIR/libggml.0.dylib"

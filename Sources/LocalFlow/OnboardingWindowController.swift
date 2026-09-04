@@ -146,6 +146,7 @@ final class OnboardingWindowController: NSWindowController {
         )
         subtitle.textColor = .secondaryLabelColor
 
+        progressIndicator.isIndeterminate = false
         progressIndicator.minValue = 0
         progressIndicator.maxValue = 4
         progressIndicator.style = .bar

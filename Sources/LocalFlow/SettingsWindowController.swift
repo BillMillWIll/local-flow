@@ -72,7 +72,7 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate, N
         self.availableEngines = state.availableEngines
 
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 600, height: 640),
+            contentRect: NSRect(x: 0, y: 0, width: 600, height: 600),
             styleMask: [.titled, .closable, .miniaturizable],
             backing: .buffered,
             defer: false
@@ -285,6 +285,11 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate, N
         statusDetailLabel.font = .systemFont(ofSize: 12)
         statusDetailLabel.textColor = .secondaryLabelColor
         statusDetailLabel.lineBreakMode = .byTruncatingTail
+        statusTitleLabel.lineBreakMode = .byTruncatingTail
+        // Lange Fehlertexte dürfen das Fenster nicht verbreitern.
+        statusTitleLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        statusDetailLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        resultLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
         let statusText = NSStackView(views: [statusTitleLabel, statusDetailLabel])
         statusText.orientation = .vertical
@@ -352,7 +357,8 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate, N
 
         resultLabel.stringValue = "Noch kein Testtranskript."
         resultLabel.textColor = .secondaryLabelColor
-        resultLabel.maximumNumberOfLines = 3
+        resultLabel.maximumNumberOfLines = 4
+        resultLabel.preferredMaxLayoutWidth = 340
 
         downloadProgress.minValue = 0
         downloadProgress.maxValue = 100

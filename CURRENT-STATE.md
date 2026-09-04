@@ -45,6 +45,11 @@ in `docs/agent/`.
 - Push-to-talk gestures: hold; double tap for hands-free; a menu item can
   start and stop hands-free recording too (`PushToTalkState`,
   `DoubleTapDetector`).
+- The start sound plays before the recorder starts and the stop sound after
+  it stops; otherwise the Apple engine transcribes the beep as a word.
+- libggml's compiled-in Homebrew backend path is neutralised in the bundle
+  (`build-app.sh`), because a Mac with Homebrew would otherwise load foreign
+  backends and crash in the VAD path.
 - Recording WAV and tool output files are deleted after each dictation.
 - Models are stored in `~/Library/Application Support/LocalFlow/`.
 - App settings, dictionary and the last five transcripts are stored in macOS

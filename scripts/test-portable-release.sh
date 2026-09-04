@@ -66,6 +66,12 @@ for tool in "$WHISPER_BINARY" "$PARAKEET_BINARY"; do
     fi
 done
 
+# Auch mit sichtbarem Homebrew dürfen keine fremden Backends geladen werden.
+if "$WHISPER_BINARY" -h 2>&1 | grep -F 'load_backend: loaded' | grep -Fq '/opt/homebrew'; then
+    echo "Abbruch: whisper-cli lädt Backends aus Homebrew statt aus dem Bundle." >&2
+    exit 1
+fi
+
 mkdir -p "$MODEL_DIR"
 LOCAL_FLOW_MODEL_DIRECTORY="$MODEL_DIR" "$APP_BINARY" --download-model vad
 VAD_PATH="$MODEL_DIR/ggml-silero-v5.1.2.bin"

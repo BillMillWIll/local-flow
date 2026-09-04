@@ -368,9 +368,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         Task {
             do {
+                // Der Ton läuft vor der Aufnahme, sonst landet er im Transkript.
+                await playSoundAndWait(.start)
                 try await recorder.start(microphone: selectedMicrophone)
                 recordingStartedAt = now
-                playSound(.start)
                 scheduleMaximumDuration()
                 if pushToTalkState.recordingDidStart() == .stopRecording {
                     stopAndTranscribe(destination: .paste)
@@ -436,9 +437,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         Task {
             do {
+                await playSoundAndWait(.start)
                 try await recorder.start(microphone: selectedMicrophone)
                 recordingStartedAt = now
-                playSound(.start)
                 try await Task.sleep(for: .seconds(4))
                 stopAndTranscribe(destination: .test)
             } catch {
@@ -457,10 +458,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         maximumDurationTask?.cancel()
         let duration = recorder.currentDuration
         recordingStartedAt = nil
-        playSound(.stop)
 
         do {
             let audioURL = try recorder.stop()
+            playSound(.stop)
 
             if destination == .paste, !RecordingGuard.isLongEnough(duration) {
                 AudioRecorder.discardRecording()
@@ -522,6 +523,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
             resetStatusSoon()
         } catch {
+            if destination == .test {
+                settingsWindowController?.setTestResult("Fehler: \(error.localizedDescription)")
+            }
             show(error)
         }
     }
@@ -700,13 +704,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func show(_ error: Error) {
         NSSound.beep()
-        setActivity(.failure(error.localizedDescription))
+        var message = error.localizedDescription
+            .replacingOccurrences(of: "\n", with: " ")
+        if message.count > 140 {
+            message = String(message.prefix(140)) + " …"
+        }
+        setActivity(.failure(message))
         resetStatusSoon()
     }
 
     private func playSound(_ kind: SoundFeedback.Kind) {
         guard soundsEnabled else { return }
         SoundFeedback.play(kind)
+    }
+
+    private func playSoundAndWait(_ kind: SoundFeedback.Kind) async {
+        guard soundsEnabled else { return }
+        SoundFeedback.play(kind)
+        try? await Task.sleep(for: .milliseconds(220))
     }
 
     private var readyActivity: LocalFlowActivity {

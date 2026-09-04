@@ -62,6 +62,11 @@ enum EngineRuntime {
         process.waitUntilExit()
 
         guard process.terminationStatus == 0 else {
+            if process.terminationReason == .uncaughtSignal {
+                throw LocalFlowError.transcriptionFailed(
+                    "\(executableURL.lastPathComponent) ist abgestürzt (Signal \(process.terminationStatus))."
+                )
+            }
             let data = errorPipe.fileHandleForReading.readDataToEndOfFile()
             let details = String(decoding: data, as: UTF8.self)
                 .trimmingCharacters(in: .whitespacesAndNewlines)
