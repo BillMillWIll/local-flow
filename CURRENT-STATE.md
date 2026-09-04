@@ -1,6 +1,6 @@
 # Current State
 
-Updated: 23 June 2026
+Updated: 4 September 2026
 
 This is the first file to read in a new session before changing Local Flow.
 Repository-wide AI instructions and the mandatory release workflow are defined
@@ -105,6 +105,10 @@ older Local Flow installations remain usable.
   explicit product decision and privacy review.
 
 ## Next Sensible Steps
+
+Measured findings and engine comparison (Whisper, Parakeet, Apple
+SpeechTranscriber, Foundation Models) are in `AUDIT-2026-09.md`.
+
 
 1. Confirm first-run microphone and accessibility interaction with a friend.
 2. Add Developer ID signing and notarization if distribution expands.
