@@ -18,16 +18,26 @@ enum ModelInstaller {
             .appendingPathComponent("Library/Application Support/LocalFlow")
     }
 
-    static func modelURL(for model: WhisperModel) -> URL {
+    static func modelURL(for model: ModelFile) -> URL {
         modelDirectory.appendingPathComponent(model.fileName)
     }
 
-    static func isInstalled(_ model: WhisperModel) -> Bool {
+    static func isInstalled(_ model: ModelFile) -> Bool {
         FileManager.default.fileExists(atPath: modelURL(for: model).path)
     }
 
+    /// All local files of the engine are present. Apple's language asset is
+    /// checked separately because that lookup is asynchronous.
+    static func hasLocalFiles(for engine: RecognitionEngine) -> Bool {
+        engine.requiredFiles.allSatisfy(isInstalled)
+    }
+
+    static func missingFiles(for engine: RecognitionEngine) -> [ModelFile] {
+        engine.requiredFiles.filter { !isInstalled($0) }
+    }
+
     static func install(
-        _ model: WhisperModel,
+        _ model: ModelFile,
         progress: @escaping @Sendable (ModelDownloadProgress) -> Void
     ) async throws {
         if isInstalled(model) {

@@ -14,15 +14,18 @@ final class PushToTalkMonitor {
     private var key: PushToTalkKey
     private let onPress: () -> Void
     private let onRelease: () -> Void
+    private let onEscape: () -> Void
 
     init(
         key: PushToTalkKey,
         onPress: @escaping () -> Void,
-        onRelease: @escaping () -> Void
+        onRelease: @escaping () -> Void,
+        onEscape: @escaping () -> Void
     ) {
         self.key = key
         self.onPress = onPress
         self.onRelease = onRelease
+        self.onEscape = onEscape
     }
 
     func start() {
@@ -48,6 +51,11 @@ final class PushToTalkMonitor {
     private func handle(_ event: NSEvent) {
         if event.type == .systemDefined {
             handleMediaKey(event)
+            return
+        }
+
+        if event.type == .keyDown, event.keyCode == 53, key.keyCode != 53, !event.isARepeat {
+            onEscape()
             return
         }
 

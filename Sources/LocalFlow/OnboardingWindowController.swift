@@ -17,7 +17,7 @@ final class OnboardingWindowController: NSWindowController {
     private let accessibilityDetail = NSTextField(labelWithString: "Bedienungshilfen erlauben")
     private let accessibilityButton = NSButton()
     private let modelSymbol = NSImageView()
-    private let modelDetail = NSTextField(labelWithString: "Sprachmodell herunterladen")
+    private let modelDetail = NSTextField(labelWithString: "Spracherkennung vorbereiten")
     private let modelButton = NSButton()
     private let testSymbol = NSImageView()
     private let testDetail = NSTextField(labelWithString: "Kurze Testaufnahme durchführen")
@@ -94,7 +94,7 @@ final class OnboardingWindowController: NSWindowController {
             symbol: modelSymbol,
             detail: modelDetail,
             button: modelButton,
-            completedText: "Sprachmodell ist bereit"
+            completedText: "Spracherkennung ist bereit"
         )
         if progress.modelInstalled {
             modelPresentation = .installed
@@ -163,7 +163,7 @@ final class OnboardingWindowController: NSWindowController {
         accessibilityButton.action = #selector(requestAccessibility)
         accessibilityButton.bezelStyle = .rounded
 
-        modelButton.title = "Herunterladen"
+        modelButton.title = "Vorbereiten"
         modelButton.target = self
         modelButton.action = #selector(installModel)
         modelButton.bezelStyle = .rounded

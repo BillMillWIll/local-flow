@@ -1,18 +1,23 @@
 import AppKit
 @preconcurrency import ApplicationServices
 import AVFoundation
-import CoreAudio
-import CryptoKit
 import LocalFlowCore
 import QuartzCore
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
-    private static let pushToTalkKeyDefaultsKey = "pushToTalkKey"
-    private static let whisperModelDefaultsKey = "whisperModel"
-    private static let microphoneSelectionDefaultsKey = "microphoneSelection"
-    private static let transcriptHistoryDefaultsKey = "transcriptHistory"
-    private static let onboardingCompletedDefaultsKey = "onboardingCompleted"
+    private enum Keys {
+        static let pushToTalkKey = "pushToTalkKey"
+        static let legacyWhisperModel = "whisperModel"
+        static let recognitionEngine = "recognitionEngine"
+        static let microphoneSelection = "microphoneSelection"
+        static let transcriptHistory = "transcriptHistory"
+        static let onboardingCompleted = "onboardingCompleted"
+        static let customWords = "customWords"
+        static let replacementRules = "replacementRules"
+        static let cleanupEnabled = "cleanupEnabled"
+        static let soundsDisabled = "soundsDisabled"
+    }
 
     private enum TranscriptionDestination {
         case paste
@@ -20,51 +25,47 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private let recorder = AudioRecorder()
+    private let defaults = UserDefaults.standard
     private var hotkeyMonitor: PushToTalkMonitor?
     private var settingsWindowController: SettingsWindowController?
     private var onboardingWindowController: OnboardingWindowController?
     private var statusItem: NSStatusItem!
     private var statusMenuItem: NSMenuItem!
+    private var handsFreeMenuItem: NSMenuItem!
+    private var cleanupMenuItem: NSMenuItem!
     private var copyLatestMenuItem: NSMenuItem!
     private var updateMenuItem: NSMenuItem!
     private var historyMenu: NSMenu!
     private var pushToTalkState = PushToTalkState()
+    private var doubleTap = DoubleTapDetector()
     private var selectedKey = PushToTalkKey.defaultKey
-    private var selectedModel = WhisperModel.defaultModel
+    private var selectedEngine = RecognitionEngine.parakeet
     private var selectedMicrophone = MicrophoneSelection.systemDefault
+    private var customWordsText = ""
+    private var replacementRulesText = ReplacementRules.defaultText
+    private var cleanupEnabled = false
+    private var soundsEnabled = true
     private var transcriptHistory = TranscriptHistory()
     private var isTestRecording = false
     private var isInstallingModel = false
     private var onboardingTestCompleted = false
+    private var appleGermanInstalled = false
     private var deferredStatusReset = DeferredReset()
+    private var recordingStartedAt: TimeInterval?
+    private var maximumDurationTask: Task<Void, Never>?
+    private var currentActivity = LocalFlowActivity.ready(keyTitle: "")
+
+    // MARK: - Lifecycle
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        selectedKey = PushToTalkKey(
-            savedValue: UserDefaults.standard.string(
-                forKey: Self.pushToTalkKeyDefaultsKey
-            )
-        )
-        selectedModel = WhisperModel(
-            savedValue: UserDefaults.standard.string(
-                forKey: Self.whisperModelDefaultsKey
-            )
-        )
-        selectedMicrophone = MicrophoneSelection(
-            savedValue: UserDefaults.standard.string(
-                forKey: Self.microphoneSelectionDefaultsKey
-            )
-        )
-        transcriptHistory = TranscriptHistory(
-            entries: UserDefaults.standard.stringArray(
-                forKey: Self.transcriptHistoryDefaultsKey
-            ) ?? []
-        )
+        loadSettings()
         configureStatusItem()
 
         hotkeyMonitor = PushToTalkMonitor(
             key: selectedKey,
-            onPress: { [weak self] in self?.beginRecording() },
-            onRelease: { [weak self] in self?.finishRecording() }
+            onPress: { [weak self] in self?.pushToTalkPressed() },
+            onRelease: { [weak self] in self?.pushToTalkReleased() },
+            onEscape: { [weak self] in self?.cancelRecording() }
         )
         hotkeyMonitor?.start()
         configureSettingsWindow()
@@ -72,8 +73,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         updateTranscriptHistoryViews()
         refreshPermissions()
         refreshOnboarding()
+        setActivity(readyActivity)
 
-        if UserDefaults.standard.bool(forKey: Self.onboardingCompletedDefaultsKey) {
+        if defaults.bool(forKey: Keys.onboardingCompleted) {
             settingsWindowController?.show()
         } else {
             onboardingWindowController?.show()
@@ -81,7 +83,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         Task {
             settingsWindowController?.refreshMicrophones(selected: selectedMicrophone)
-            await installSelectedModelIfNeeded()
+            await refreshAppleSpeechState()
+            await prepareSelectedEngineIfNeeded()
             await checkForUpdates(showCurrentResult: false)
         }
     }
@@ -89,36 +92,63 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidBecomeActive(_ notification: Notification) {
         refreshPermissions()
         refreshOnboarding()
+        settingsWindowController?.setCleanupAvailability(TextCleanup.availability())
+        settingsWindowController?.setLoginItemEnabled(LoginItem.isEnabled)
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         false
     }
 
-    func applicationShouldHandleReopen(
-        _ sender: NSApplication,
-        hasVisibleWindows flag: Bool
-    ) -> Bool {
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         settingsWindowController?.show()
         return true
     }
 
+    func applicationWillTerminate(_ notification: Notification) {
+        AudioRecorder.discardRecording()
+    }
+
+    private func loadSettings() {
+        selectedKey = PushToTalkKey(savedValue: defaults.string(forKey: Keys.pushToTalkKey))
+        selectedEngine = RecognitionEngine(
+            savedValue: defaults.string(forKey: Keys.recognitionEngine),
+            legacyWhisperModel: defaults.string(forKey: Keys.legacyWhisperModel),
+            appleSupported: AppleSpeechSupport.isSupported
+        )
+        selectedMicrophone = MicrophoneSelection(savedValue: defaults.string(forKey: Keys.microphoneSelection))
+        transcriptHistory = TranscriptHistory(entries: defaults.stringArray(forKey: Keys.transcriptHistory) ?? [])
+        customWordsText = defaults.string(forKey: Keys.customWords) ?? ""
+        replacementRulesText = defaults.string(forKey: Keys.replacementRules) ?? ReplacementRules.defaultText
+        cleanupEnabled = defaults.bool(forKey: Keys.cleanupEnabled) && TextCleanup.availability().isAvailable
+        soundsEnabled = !defaults.bool(forKey: Keys.soundsDisabled)
+    }
+
+    // MARK: - Menu bar
+
     private func configureStatusItem() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
-        statusItem.button?.image = NSImage(
-            systemSymbolName: "mic",
-            accessibilityDescription: "Local Flow"
-        )
+        statusItem.button?.image = NSImage(systemSymbolName: "mic", accessibilityDescription: "Local Flow")
 
         let menu = NSMenu()
         statusMenuItem = NSMenuItem(title: readyText, action: nil, keyEquivalent: "")
         menu.addItem(statusMenuItem)
-        menu.addItem(.separator())
-        menu.addItem(
-            withTitle: "Einstellungen öffnen",
-            action: #selector(openSettings),
+        handsFreeMenuItem = NSMenuItem(
+            title: "Freihändige Aufnahme starten",
+            action: #selector(toggleHandsFreeFromMenu),
             keyEquivalent: ""
         )
+        handsFreeMenuItem.target = self
+        menu.addItem(handsFreeMenuItem)
+        menu.addItem(.separator())
+        menu.addItem(withTitle: "Einstellungen öffnen", action: #selector(openSettings), keyEquivalent: "")
+        cleanupMenuItem = NSMenuItem(
+            title: "Text mit Apple Intelligence bereinigen",
+            action: #selector(toggleCleanupFromMenu),
+            keyEquivalent: ""
+        )
+        cleanupMenuItem.target = self
+        menu.addItem(cleanupMenuItem)
         copyLatestMenuItem = NSMenuItem(
             title: "Letzten Text kopieren",
             action: #selector(copyLatestTranscript),
@@ -138,44 +168,62 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
         updateMenuItem.target = self
         menu.addItem(updateMenuItem)
+        menu.addItem(.separator())
         menu.addItem(
             withTitle: "Local Flow beenden",
             action: #selector(NSApplication.terminate(_:)),
             keyEquivalent: "q"
         )
         statusItem.menu = menu
+        updateCleanupMenuItem()
     }
 
+    private func updateCleanupMenuItem() {
+        let availability = TextCleanup.availability()
+        cleanupMenuItem.isEnabled = availability.isAvailable
+        cleanupMenuItem.state = cleanupEnabled ? .on : .off
+    }
+
+    // MARK: - Windows
+
     private func configureSettingsWindow() {
-        settingsWindowController = SettingsWindowController(
+        let state = SettingsWindowController.InitialState(
             selectedKey: selectedKey,
-            selectedModel: selectedModel,
+            selectedEngine: selectedEngine,
+            availableEngines: RecognitionEngine.available(appleSupported: AppleSpeechSupport.isSupported),
             selectedMicrophone: selectedMicrophone,
-            onKeyChanged: { [weak self] key in
-                self?.changePushToTalkKey(to: key)
-            },
-            onModelChanged: { [weak self] model in
-                self?.changeWhisperModel(to: model)
-            },
-            onMicrophoneChanged: { [weak self] microphone in
-                self?.changeMicrophone(to: microphone)
-            },
-            onTestRecording: { [weak self] in
-                self?.beginTestRecording()
-            },
-            onCopyLatestTranscript: { [weak self] in
-                self?.copyLatestTranscript()
-            },
-            onCopyHistoryTranscript: { [weak self] transcript in
-                self?.copyTranscriptToPasteboard(transcript)
-            },
-            onRetryModelDownload: { [weak self] in
-                Task { await self?.installSelectedModelIfNeeded() }
-            },
-            onCheckForUpdates: { [weak self] in
-                Task { await self?.checkForUpdates(showCurrentResult: true) }
-            }
+            customWords: customWordsText,
+            replacementRules: replacementRulesText,
+            cleanupEnabled: cleanupEnabled,
+            cleanupAvailability: TextCleanup.availability(),
+            soundsEnabled: soundsEnabled,
+            loginItemEnabled: LoginItem.isEnabled
         )
+        let callbacks = SettingsWindowController.Callbacks(
+            onKeyChanged: { [weak self] key in self?.changePushToTalkKey(to: key) },
+            onEngineChanged: { [weak self] engine in self?.changeEngine(to: engine) },
+            onMicrophoneChanged: { [weak self] microphone in self?.changeMicrophone(to: microphone) },
+            onCustomWordsChanged: { [weak self] text in
+                self?.customWordsText = text
+                self?.defaults.set(text, forKey: Keys.customWords)
+            },
+            onReplacementRulesChanged: { [weak self] text in
+                self?.replacementRulesText = text
+                self?.defaults.set(text, forKey: Keys.replacementRules)
+            },
+            onCleanupChanged: { [weak self] enabled in self?.setCleanupEnabled(enabled) },
+            onSoundsChanged: { [weak self] enabled in
+                self?.soundsEnabled = enabled
+                self?.defaults.set(!enabled, forKey: Keys.soundsDisabled)
+            },
+            onLoginItemChanged: { [weak self] enabled in self?.setLoginItemEnabled(enabled) },
+            onTestRecording: { [weak self] in self?.beginTestRecording() },
+            onCopyLatestTranscript: { [weak self] in self?.copyLatestTranscript() },
+            onCopyHistoryTranscript: { [weak self] transcript in self?.copyTranscriptToPasteboard(transcript) },
+            onRetryModelDownload: { [weak self] in Task { await self?.prepareSelectedEngineIfNeeded() } },
+            onCheckForUpdates: { [weak self] in Task { await self?.checkForUpdates(showCurrentResult: true) } }
+        )
+        settingsWindowController = SettingsWindowController(state: state, callbacks: callbacks)
     }
 
     private func configureOnboardingWindow() {
@@ -197,16 +245,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self?.openAccessibilitySettings()
             },
             onInstallModel: { [weak self] in
-                Task { await self?.installSelectedModelIfNeeded() }
+                Task { await self?.prepareSelectedEngineIfNeeded() }
             },
-            onTestRecording: { [weak self] in
-                self?.beginTestRecording()
-            },
+            onTestRecording: { [weak self] in self?.beginTestRecording() },
             onFinish: { [weak self] in
-                UserDefaults.standard.set(
-                    true,
-                    forKey: Self.onboardingCompletedDefaultsKey
-                )
+                self?.defaults.set(true, forKey: Keys.onboardingCompleted)
                 self?.onboardingWindowController?.close()
                 self?.settingsWindowController?.show()
             },
@@ -217,11 +260,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
     }
 
+    private var isEngineReady: Bool {
+        if selectedEngine.requiresAppleSpeech {
+            return appleGermanInstalled
+        }
+        return ModelInstaller.hasLocalFiles(for: selectedEngine)
+    }
+
     private func currentOnboardingProgress() -> OnboardingProgress {
         OnboardingProgress(
             microphoneAllowed: AVCaptureDevice.authorizationStatus(for: .audio) == .authorized,
             accessibilityAllowed: AXIsProcessTrusted(),
-            modelInstalled: ModelInstaller.isInstalled(selectedModel),
+            modelInstalled: isEngineReady,
             testRecordingCompleted: onboardingTestCompleted
         )
     }
@@ -231,52 +281,97 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func openAccessibilitySettings() {
-        let url = URL(
-            string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"
-        )!
+        let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!
         NSWorkspace.shared.open(url)
     }
 
+    // MARK: - Settings changes
+
     private func changePushToTalkKey(to key: PushToTalkKey) {
         selectedKey = key
-        UserDefaults.standard.set(key.rawValue, forKey: Self.pushToTalkKeyDefaultsKey)
+        defaults.set(key.rawValue, forKey: Keys.pushToTalkKey)
         hotkeyMonitor?.updateKey(key)
+        doubleTap.reset()
         settingsWindowController?.setSelectedKey(key)
-        updateStatus(readyText, symbol: "mic")
+        setActivity(readyActivity)
     }
 
-    private func changeWhisperModel(to model: WhisperModel) {
-        selectedModel = model
-        UserDefaults.standard.set(
-            model.rawValue,
-            forKey: Self.whisperModelDefaultsKey
-        )
-        Task {
-            await installSelectedModelIfNeeded()
-        }
+    private func changeEngine(to engine: RecognitionEngine) {
+        selectedEngine = engine
+        defaults.set(engine.rawValue, forKey: Keys.recognitionEngine)
+        settingsWindowController?.setModelDownloadProgress(nil)
+        refreshOnboarding()
+        setActivity(readyActivity)
+        Task { await prepareSelectedEngineIfNeeded() }
     }
 
     private func changeMicrophone(to microphone: MicrophoneSelection) {
         selectedMicrophone = microphone
-        UserDefaults.standard.set(
-            microphone.rawValue,
-            forKey: Self.microphoneSelectionDefaultsKey
-        )
-        updateStatus(readyText, symbol: "mic")
+        defaults.set(microphone.rawValue, forKey: Keys.microphoneSelection)
+        setActivity(readyActivity)
     }
 
-    private func beginRecording() {
+    private func setCleanupEnabled(_ enabled: Bool) {
+        cleanupEnabled = enabled && TextCleanup.availability().isAvailable
+        defaults.set(cleanupEnabled, forKey: Keys.cleanupEnabled)
+        settingsWindowController?.setCleanupEnabled(cleanupEnabled)
+        updateCleanupMenuItem()
+        setActivity(readyActivity)
+    }
+
+    private func setLoginItemEnabled(_ enabled: Bool) {
+        do {
+            try LoginItem.setEnabled(enabled)
+        } catch {
+            show(error)
+        }
+        settingsWindowController?.setLoginItemEnabled(LoginItem.isEnabled)
+    }
+
+    // MARK: - Recording
+
+    private var now: TimeInterval {
+        ProcessInfo.processInfo.systemUptime
+    }
+
+    private func pushToTalkPressed() {
+        let isDoubleTap = doubleTap.press(at: now)
+
+        if pushToTalkState.isHandsFree {
+            if pushToTalkState.press() == .stopRecording {
+                stopAndTranscribe(destination: .paste)
+            }
+            return
+        }
+
         guard !isTestRecording, !isInstallingModel else { return }
-        guard ModelInstaller.isInstalled(selectedModel) else {
-            Task { await installSelectedModelIfNeeded() }
+        guard isEngineReady else {
+            Task { await prepareSelectedEngineIfNeeded() }
             return
         }
         guard pushToTalkState.press() == .startRecording else { return }
-        updateStatus("Aufnahme läuft …", symbol: "waveform.circle.fill")
+        if isDoubleTap {
+            pushToTalkState.enableHandsFree()
+        }
+        startRecording()
+    }
+
+    private func pushToTalkReleased() {
+        doubleTap.release(at: now)
+        guard pushToTalkState.release() == .stopRecording else { return }
+        stopAndTranscribe(destination: .paste)
+    }
+
+    private func startRecording() {
+        let handsFree = pushToTalkState.isHandsFree
+        setActivity(handsFree ? .handsFreeRecording : .recording)
 
         Task {
             do {
                 try await recorder.start(microphone: selectedMicrophone)
+                recordingStartedAt = now
+                playSound(.start)
+                scheduleMaximumDuration()
                 if pushToTalkState.recordingDidStart() == .stopRecording {
                     stopAndTranscribe(destination: .paste)
                 }
@@ -288,26 +383,62 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func finishRecording() {
-        guard pushToTalkState.release() == .stopRecording else { return }
-        stopAndTranscribe(destination: .paste)
+    private func scheduleMaximumDuration() {
+        maximumDurationTask?.cancel()
+        maximumDurationTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(RecordingGuard.maximumDuration))
+            guard !Task.isCancelled, let self else { return }
+            if pushToTalkState.stop() == .stopRecording {
+                stopAndTranscribe(destination: .paste)
+            }
+        }
+    }
+
+    @objc private func toggleHandsFreeFromMenu() {
+        if pushToTalkState.isRecording {
+            if pushToTalkState.stop() == .stopRecording {
+                stopAndTranscribe(destination: .paste)
+            }
+            return
+        }
+        guard !isTestRecording, !isInstallingModel else { return }
+        guard isEngineReady else {
+            Task { await prepareSelectedEngineIfNeeded() }
+            return
+        }
+        guard pushToTalkState.press() == .startRecording else { return }
+        pushToTalkState.enableHandsFree()
+        startRecording()
+    }
+
+    private func cancelRecording() {
+        guard pushToTalkState.cancel() else { return }
+        maximumDurationTask?.cancel()
+        recorder.cancel()
+        recordingStartedAt = nil
+        doubleTap.reset()
+        playSound(.cancel)
+        setActivity(.cancelled)
+        resetStatusSoon()
     }
 
     private func beginTestRecording() {
-        guard !isTestRecording, !isInstallingModel else { return }
-        guard ModelInstaller.isInstalled(selectedModel) else {
-            Task { await installSelectedModelIfNeeded() }
+        guard !isTestRecording, !isInstallingModel, !pushToTalkState.isRecording else { return }
+        guard isEngineReady else {
+            Task { await prepareSelectedEngineIfNeeded() }
             return
         }
         isTestRecording = true
         settingsWindowController?.setTestRecordingEnabled(false)
         settingsWindowController?.setTestResult("Testaufnahme läuft …")
         onboardingWindowController?.setTestRunning(true)
-        updateStatus("Testaufnahme läuft …", symbol: "waveform.circle.fill")
+        setActivity(.testRecording)
 
         Task {
             do {
                 try await recorder.start(microphone: selectedMicrophone)
+                recordingStartedAt = now
+                playSound(.start)
                 try await Task.sleep(for: .seconds(4))
                 stopAndTranscribe(destination: .test)
             } catch {
@@ -320,36 +451,60 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    // MARK: - Transcription
+
     private func stopAndTranscribe(destination: TranscriptionDestination) {
-        updateStatus(
-            "Transkribiere mit \(selectedModel.title) …",
-            symbol: "ellipsis.circle"
-        )
+        maximumDurationTask?.cancel()
+        let duration = recorder.currentDuration
+        recordingStartedAt = nil
+        playSound(.stop)
 
         do {
             let audioURL = try recorder.stop()
-            let model = selectedModel
-            Task.detached {
-                let result = Result {
-                    try WhisperTranscriber.transcribe(
-                        audioURL: audioURL,
-                        model: model
-                    )
+
+            if destination == .paste, !RecordingGuard.isLongEnough(duration) {
+                AudioRecorder.discardRecording()
+                finishProcessing(destination: destination)
+                setActivity(.tooShort)
+                resetStatusSoon()
+                return
+            }
+
+            setActivity(.processing)
+            let engine = EngineFactory.make(selectedEngine)
+            let options = TranscriptionOptions(customWords: CustomWords.parse(customWordsText))
+            let rules = ReplacementRules.parse(replacementRulesText)
+            let shouldClean = cleanupEnabled
+
+            Task {
+                let result: Result<String, Error>
+                do {
+                    let raw = try await engine.transcribe(audioURL: audioURL, options: options)
+                    var text = ReplacementRules.apply(rules, to: raw)
+                    if shouldClean, !text.isEmpty {
+                        setActivity(.cleaning)
+                        text = await TextCleanup.clean(text)
+                    }
+                    let final = text.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if final.isEmpty {
+                        result = .failure(LocalFlowError.emptyTranscript)
+                    } else {
+                        result = .success(final)
+                    }
+                } catch {
+                    result = .failure(error)
                 }
-                await MainActor.run {
-                    self.handleTranscription(result, destination: destination)
-                }
+                AudioRecorder.discardRecording()
+                handleTranscription(result, destination: destination)
             }
         } catch {
+            AudioRecorder.discardRecording()
             finishProcessing(destination: destination)
             show(error)
         }
     }
 
-    private func handleTranscription(
-        _ result: Result<String, Error>,
-        destination: TranscriptionDestination
-    ) {
+    private func handleTranscription(_ result: Result<String, Error>, destination: TranscriptionDestination) {
         finishProcessing(destination: destination)
         do {
             let transcript = try result.get()
@@ -358,12 +513,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             switch destination {
             case .paste:
                 try TextInserter.paste(transcript)
-                updateStatus("Eingefügt", symbol: "checkmark.circle.fill")
+                setActivity(.success("Eingefügt"))
             case .test:
                 settingsWindowController?.setTestResult(transcript)
                 onboardingTestCompleted = true
                 refreshOnboarding()
-                updateStatus("Test fertig", symbol: "checkmark.circle.fill")
+                setActivity(.success("Test fertig"))
             }
             resetStatusSoon()
         } catch {
@@ -384,10 +539,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func recordTranscript(_ transcript: String) {
         transcriptHistory.record(transcript)
-        UserDefaults.standard.set(
-            transcriptHistory.entries,
-            forKey: Self.transcriptHistoryDefaultsKey
-        )
+        defaults.set(transcriptHistory.entries, forKey: Keys.transcriptHistory)
         updateTranscriptHistoryViews()
     }
 
@@ -404,8 +556,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         for (index, transcript) in transcriptHistory.entries.enumerated() {
+            let preview = transcript.count > 60 ? String(transcript.prefix(60)) + " …" : transcript
             let item = NSMenuItem(
-                title: "\(index + 1). \(transcript)",
+                title: "\(index + 1). \(preview.replacingOccurrences(of: "\n", with: " "))",
                 action: #selector(copyHistoryTranscript(_:)),
                 keyEquivalent: ""
             )
@@ -425,101 +578,111 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         copyTranscriptToPasteboard(transcript)
     }
 
+    @objc private func toggleCleanupFromMenu() {
+        setCleanupEnabled(!cleanupEnabled)
+    }
+
     private func copyTranscriptToPasteboard(_ transcript: String) {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(transcript, forType: .string)
         settingsWindowController?.setTestResult("Kopiert: \(transcript)")
-        updateStatus("Text kopiert", symbol: "doc.on.clipboard.fill")
+        setActivity(.success("Text kopiert"))
         resetStatusSoon()
     }
 
-    private func installSelectedModelIfNeeded() async {
-        let model = selectedModel
-        if ModelInstaller.isInstalled(model) {
-            updateStatus(readyText, symbol: "mic")
+    // MARK: - Engine preparation
+
+    private func refreshAppleSpeechState() async {
+        guard AppleSpeechSupport.isSupported else { return }
+        appleGermanInstalled = await AppleSpeechSupport.isGermanInstalled()
+        refreshOnboarding()
+    }
+
+    private func prepareSelectedEngineIfNeeded() async {
+        let engine = selectedEngine
+        if engine.requiresAppleSpeech {
+            await refreshAppleSpeechState()
+            if appleGermanInstalled {
+                settingsWindowController?.setEngineDetail(engine.detail)
+                return
+            }
+        } else if ModelInstaller.hasLocalFiles(for: engine) {
+            settingsWindowController?.setEngineDetail(engine.detail)
             return
         }
-        guard !isInstallingModel else { return }
 
+        guard !isInstallingModel else { return }
         isInstallingModel = true
-        settingsWindowController?.setTestRecordingEnabled(false)
+        defer {
+            isInstallingModel = false
+            refreshOnboarding()
+        }
+
+        let progressHandler: @Sendable (ModelDownloadProgress) -> Void = { [weak self] progress in
+            Task { @MainActor in
+                self?.settingsWindowController?.setModelDownloadProgress(progress)
+                self?.onboardingWindowController?.setModelProgress(progress)
+                self?.setActivity(.downloadingModel(progress.percentage))
+            }
+        }
+
         settingsWindowController?.setModelDownloadProgress(
             ModelDownloadProgress(receivedBytes: 0, totalBytes: nil)
         )
         onboardingWindowController?.setModelProgress(
             ModelDownloadProgress(receivedBytes: 0, totalBytes: nil)
         )
-        updateStatus(
-            "Lade \(model.title) einmalig herunter …",
-            symbol: "arrow.down.circle"
-        )
+        setActivity(.downloadingModel(nil))
 
         do {
-            try await ModelInstaller.install(model) { [weak self] progress in
-                Task { @MainActor in
-                    self?.settingsWindowController?.setModelDownloadProgress(progress)
-                    self?.onboardingWindowController?.setModelProgress(progress)
-                    if let percentage = progress.percentage {
-                        self?.updateStatus(
-                            "Lade \(model.title): \(percentage) %",
-                            symbol: "arrow.down.circle"
-                        )
-                    }
+            if engine.requiresAppleSpeech {
+                settingsWindowController?.setEngineDetail("Apple lädt das deutsche Sprachpaket einmalig.")
+                try await AppleSpeechSupport.installGerman(progress: progressHandler)
+                appleGermanInstalled = await AppleSpeechSupport.isGermanInstalled()
+                guard appleGermanInstalled else { throw LocalFlowError.appleSpeechUnavailable }
+            } else {
+                for file in ModelInstaller.missingFiles(for: engine) {
+                    settingsWindowController?.setEngineDetail(
+                        "Einmaliger Download: \(file.fileName) (\(file.sizeDescription))"
+                    )
+                    try await ModelInstaller.install(file, progress: progressHandler)
                 }
             }
             settingsWindowController?.setModelDownloadProgress(nil)
+            settingsWindowController?.setEngineDetail(engine.detail)
             refreshOnboarding()
-            updateStatus("Sprachmodell ist bereit", symbol: "checkmark.circle.fill")
+            setActivity(.success("\(engine.shortTitle) ist bereit"))
             resetStatusSoon()
         } catch {
             settingsWindowController?.setModelDownloadFailed()
             onboardingWindowController?.setModelDownloadFailed()
-            refreshOnboarding()
+            settingsWindowController?.setEngineDetail(error.localizedDescription)
             show(error)
         }
-
-        isInstallingModel = false
-        settingsWindowController?.setTestRecordingEnabled(true)
-        refreshOnboarding()
-
-        if selectedModel != model {
-            await installSelectedModelIfNeeded()
-        }
     }
+
+    // MARK: - Updates
 
     private func checkForUpdates(showCurrentResult: Bool) async {
         do {
             let release = try await UpdateChecker.latestRelease()
-            let currentVersion = Bundle.main.object(
-                forInfoDictionaryKey: "CFBundleShortVersionString"
-            ) as? String ?? "0.0.0"
-            let decision = UpdateDecision(
-                current: currentVersion,
-                latestTag: release.tagName
-            )
+            let currentVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.0.0"
+            let decision = UpdateDecision(current: currentVersion, latestTag: release.tagName)
 
             if decision.isUpdateAvailable {
-                let version = release.tagName.hasPrefix("v")
-                    ? String(release.tagName.dropFirst())
-                    : release.tagName
-                settingsWindowController?.setUpdateAvailable(
-                    version: version,
-                    url: release.htmlURL
-                )
+                let version = release.tagName.hasPrefix("v") ? String(release.tagName.dropFirst()) : release.tagName
+                settingsWindowController?.setUpdateAvailable(version: version, url: release.htmlURL)
                 updateMenuItem.title = "Update \(version) laden"
                 updateMenuItem.representedObject = release.htmlURL
             } else if showCurrentResult {
                 settingsWindowController?.setUpdateCheckResult("App ist aktuell")
-                updateStatus("Local Flow ist aktuell", symbol: "checkmark.circle")
+                setActivity(.success("Local Flow ist aktuell"))
                 resetStatusSoon()
             }
         } catch {
             if showCurrentResult {
                 settingsWindowController?.setUpdateCheckResult("Update-Prüfung wiederholen")
-                updateStatus(
-                    "Update-Prüfung fehlgeschlagen",
-                    symbol: "exclamationmark.triangle"
-                )
+                setActivity(.failure("Update-Prüfung fehlgeschlagen"))
                 resetStatusSoon()
             }
         }
@@ -533,39 +696,43 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    // MARK: - Status
+
     private func show(_ error: Error) {
         NSSound.beep()
-        updateStatus(
-            error.localizedDescription,
-            symbol: "exclamationmark.triangle.fill"
-        )
+        setActivity(.failure(error.localizedDescription))
         resetStatusSoon()
     }
 
-    private func updateStatus(_ text: String, symbol: String) {
-        deferredStatusReset.invalidate()
+    private func playSound(_ kind: SoundFeedback.Kind) {
+        guard soundsEnabled else { return }
+        SoundFeedback.play(kind)
+    }
 
-        let activity: LocalFlowActivity
-        switch symbol {
-        case "waveform.circle.fill":
-            activity = text.hasPrefix("Test") ? .testRecording : .recording
-        case "ellipsis.circle":
-            activity = .processing
-        case "arrow.down.circle":
-            let percentage = text
-                .split(separator: " ")
-                .compactMap { Int($0) }
-                .last
-            activity = .downloadingModel(percentage)
-        case let value where value.contains("checkmark"):
-            activity = .success(text)
-        case let value where value.contains("exclamationmark"):
-            activity = .failure(text)
-        default:
-            activity = .ready(keyTitle: selectedKey.title)
+    private var readyActivity: LocalFlowActivity {
+        .ready(keyTitle: selectedKey.title)
+    }
+
+    private var readyText: String {
+        var parts = ["Bereit: \(selectedKey.title)", selectedEngine.shortTitle]
+        if cleanupEnabled {
+            parts.append("bereinigt")
         }
+        return parts.joined(separator: " · ")
+    }
 
-        statusMenuItem.title = text
+    private func setActivity(_ activity: LocalFlowActivity) {
+        deferredStatusReset.invalidate()
+        currentActivity = activity
+
+        if case .ready = activity {
+            statusMenuItem.title = readyText
+        } else {
+            statusMenuItem.title = activity.title
+        }
+        handsFreeMenuItem.title = pushToTalkState.isRecording
+            ? "Aufnahme beenden und einfügen"
+            : "Freihändige Aufnahme starten"
         settingsWindowController?.setActivity(activity)
         statusItem.button?.image = NSImage(
             systemSymbolName: activity.symbolName,
@@ -615,19 +782,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func resetStatusSoon() {
         let token = deferredStatusReset.schedule()
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { [weak self] in
             guard let self, deferredStatusReset.isCurrent(token) else { return }
-            updateStatus(readyText, symbol: "mic")
+            setActivity(readyActivity)
         }
-    }
-
-    private var readyText: String {
-        "Bereit: \(selectedKey.title) · \(selectedModel.title)"
     }
 
     @objc private func openSettings() {
         refreshPermissions()
         settingsWindowController?.refreshMicrophones(selected: selectedMicrophone)
+        settingsWindowController?.setCleanupAvailability(TextCleanup.availability())
+        settingsWindowController?.setCleanupEnabled(cleanupEnabled)
+        settingsWindowController?.setLoginItemEnabled(LoginItem.isEnabled)
         settingsWindowController?.show()
     }
 }

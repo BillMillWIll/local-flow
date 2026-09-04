@@ -59,6 +59,17 @@ final class AudioRecorder {
         recorder?.stop()
         recorder = nil
         restoreDefaultInputDevice()
+        Self.discardRecording()
+    }
+
+    /// Seconds recorded so far, 0 when idle.
+    var currentDuration: TimeInterval {
+        recorder?.currentTime ?? 0
+    }
+
+    /// Recordings are private; nothing stays on disk after a dictation.
+    static func discardRecording() {
+        try? FileManager.default.removeItem(at: recordingURL)
     }
 
     private func switchDefaultInputDevice(to uniqueID: String) throws {

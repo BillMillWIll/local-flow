@@ -278,7 +278,7 @@ public enum ModelInstallationPresentation: Equatable, Sendable {
     public var detail: String {
         switch self {
         case .missing:
-            return "Sprachmodell herunterladen"
+            return "Spracherkennung vorbereiten"
         case .installing(let percentage):
             return percentage.map {
                 "Sprachmodell wird geladen · \($0) %"
@@ -286,7 +286,7 @@ public enum ModelInstallationPresentation: Equatable, Sendable {
         case .failed:
             return "Download fehlgeschlagen – erneut versuchen"
         case .installed:
-            return "Sprachmodell ist bereit"
+            return "Spracherkennung ist bereit"
         }
     }
 

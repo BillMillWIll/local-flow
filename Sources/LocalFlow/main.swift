@@ -6,7 +6,7 @@ import CryptoKit
 import LocalFlowCore
 import QuartzCore
 
-func runModelDownloadDiagnostic(model: WhisperModel) -> Never {
+func runModelDownloadDiagnostic(model: ModelFile) -> Never {
     Task {
         do {
             try await ModelInstaller.install(model) { progress in
@@ -27,9 +27,7 @@ func runModelDownloadDiagnostic(model: WhisperModel) -> Never {
 let app = NSApplication.shared
 if let argumentIndex = CommandLine.arguments.firstIndex(of: "--download-model"),
    CommandLine.arguments.indices.contains(argumentIndex + 1),
-   let model = WhisperModel(
-       rawValue: CommandLine.arguments[argumentIndex + 1]
-   ) {
+   let model = ModelCatalog.file(named: CommandLine.arguments[argumentIndex + 1]) {
     runModelDownloadDiagnostic(model: model)
 } else {
     let delegate = AppDelegate()

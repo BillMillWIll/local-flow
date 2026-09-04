@@ -16,6 +16,7 @@ enum LocalFlowError: LocalizedError {
     case modelChecksumFailed
     case transcriptionFailed(String)
     case emptyTranscript
+    case appleSpeechUnavailable
 
     var errorDescription: String? {
         switch self {
@@ -26,9 +27,9 @@ enum LocalFlowError: LocalizedError {
         case .accessibilityDenied:
             return "Bedienungshilfen-Zugriff fehlt."
         case .missingWhisper:
-            return "whisper-cli wurde nicht gefunden."
+            return "Die lokale Spracherkennung fehlt im App-Paket."
         case .missingModel:
-            return "Das lokale Whisper-Modell fehlt."
+            return "Das Sprachmodell fehlt noch."
         case .modelDownloadFailed:
             return "Das Sprachmodell konnte nicht heruntergeladen werden."
         case .modelChecksumFailed:
@@ -37,6 +38,8 @@ enum LocalFlowError: LocalizedError {
             return details.isEmpty ? "Die Transkription ist fehlgeschlagen." : details
         case .emptyTranscript:
             return "Keine Sprache erkannt."
+        case .appleSpeechUnavailable:
+            return "Die Apple-Spracherkennung für Deutsch ist nicht verfügbar."
         }
     }
 }

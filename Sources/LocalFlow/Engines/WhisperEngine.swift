@@ -1,61 +1,31 @@
-import AppKit
-@preconcurrency import ApplicationServices
-import AVFoundation
-import CoreAudio
-import CryptoKit
+import Foundation
 import LocalFlowCore
-import QuartzCore
 
-enum WhisperTranscriber {
-    static func transcribe(audioURL: URL, model: WhisperModel) throws -> String {
-        let bundledExecutableURL = Bundle.main.url(
-            forResource: "whisper-cli",
-            withExtension: nil,
-            subdirectory: "whisper/bin"
-        )
-        let executableURL = bundledExecutableURL
-            ?? URL(fileURLWithPath: "/opt/homebrew/bin/whisper-cli")
-        guard FileManager.default.isExecutableFile(atPath: executableURL.path) else {
-            throw LocalFlowError.missingWhisper
-        }
+struct WhisperEngine: TranscriptionEngine {
+    func transcribe(audioURL: URL, options: TranscriptionOptions) async throws -> String {
+        try await Task.detached(priority: .userInitiated) {
+            try Self.transcribeSync(audioURL: audioURL, options: options)
+        }.value
+    }
 
-        let modelURL = ModelInstaller.modelURL(for: model)
-        guard FileManager.default.fileExists(atPath: modelURL.path) else {
+    private static func transcribeSync(audioURL: URL, options: TranscriptionOptions) throws -> String {
+        let executableURL = try EngineRuntime.executable(named: "whisper-cli")
+        guard ModelInstaller.isInstalled(ModelCatalog.whisperTurbo) else {
             throw LocalFlowError.missingModel
         }
 
-        let outputURL = FileManager.default.temporaryDirectory
-            .appendingPathComponent("local-flow-transcript")
-        let textURL = outputURL.appendingPathExtension("txt")
-        try? FileManager.default.removeItem(at: textURL)
-
+        let vadURL = ModelInstaller.modelURL(for: ModelCatalog.sileroVAD)
+        let vadPath = ModelInstaller.isInstalled(ModelCatalog.sileroVAD) ? vadURL.path : nil
+        let outputURL = EngineRuntime.transcriptOutputURL(prefix: "whisper")
         let invocation = WhisperInvocation(
-            modelPath: modelURL.path,
+            modelPath: ModelInstaller.modelURL(for: ModelCatalog.whisperTurbo).path,
             audioPath: audioURL.path,
-            outputPath: outputURL.path
+            outputPath: outputURL.path,
+            prompt: CustomWords.whisperPrompt(options.customWords),
+            vadModelPath: vadPath
         )
-        let errorPipe = Pipe()
-        let process = Process()
-        process.executableURL = executableURL
-        process.arguments = invocation.arguments
-        process.standardError = errorPipe
-        process.standardOutput = Pipe()
 
-        try process.run()
-        process.waitUntilExit()
-
-        guard process.terminationStatus == 0 else {
-            let data = errorPipe.fileHandleForReading.readDataToEndOfFile()
-            let details = String(decoding: data, as: UTF8.self)
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-            throw LocalFlowError.transcriptionFailed(details)
-        }
-
-        let transcript = try String(contentsOf: textURL, encoding: .utf8)
-        let cleaned = TranscriptCleaner.clean(transcript)
-        guard !cleaned.isEmpty else {
-            throw LocalFlowError.emptyTranscript
-        }
-        return cleaned
+        try EngineRuntime.run(executableURL, arguments: invocation.arguments)
+        return try EngineRuntime.readTranscript(outputPath: outputURL)
     }
 }
