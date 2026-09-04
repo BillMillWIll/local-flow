@@ -8,6 +8,11 @@ Prerequisites on the build Mac:
 brew install whisper-cpp libomp create-dmg
 ```
 
+The build also needs Xcode 26 (macOS 26 SDK) because the Apple engine and the
+clean-up step use the `Speech` and `FoundationModels` frameworks of macOS 26.
+The resulting app still runs on macOS 14 and 15 with the Parakeet and Whisper
+engines.
+
 Create the checked DMG:
 
 ```bash
@@ -27,10 +32,11 @@ The DMG contains:
 - a link to the macOS Applications folder
 - a compact visual drag-to-Applications installation layout
 - a written four-step guide for manual first-launch approval
-- bundled `whisper-cli` runtime and third-party notices
+- bundled `whisper-cli` and `parakeet-cli` runtime with all ggml backends
+  and third-party notices
 - the Local Flow app icon
 
-It does not contain Whisper models, recordings, settings or credentials.
+It does not contain speech models, recordings, settings or credentials.
 
 ## Publish a GitHub Release
 
@@ -68,8 +74,8 @@ gh release create "vVERSION" \
 3. Drag Local Flow into `Programme`.
 4. Choose `Replace`.
 
-Downloaded models, selected settings and transcript history remain in the
-user's Library and are not removed by replacing the app.
+Downloaded models, selected settings, dictionary and transcript history remain
+in the user's Library and are not removed by replacing the app.
 
 Local Flow checks the latest GitHub release on startup. If a newer semantic
 version exists, the settings window and menu-bar menu link to that release.

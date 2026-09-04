@@ -6,7 +6,8 @@ This folder is the starting point for every AI session working on Local Flow.
 
 Before changing Local Flow:
 
-1. Read `../../CURRENT-STATE.md`.
+1. Read `../../CURRENT-STATE.md`, then `../../AUDIT-2026-09.md` for the
+   measured engine comparison.
 2. Read `../../DISTRIBUTION.md` before changing packaging, versions or
    releases.
 3. Read `../../VERSION` and inspect `git status`.
@@ -16,7 +17,8 @@ current source of truth.
 
 ## Canonical Repository and Distribution
 
-- Local repository: `~/Desktop/ArtMotion-Antigravity/docs/local-flow`
+- Local repository: `~/Desktop/local-flow` (own Git repository since 2026-09-04;
+  the ArtMotion monorepo only keeps a reference stub)
 - Public repository: `https://github.com/BillMillWIll/local-flow`
 - Permanent latest-download page:
   `https://github.com/BillMillWIll/local-flow/releases/latest`

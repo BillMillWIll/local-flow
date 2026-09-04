@@ -14,11 +14,11 @@ Installation:
 
 1. Open the DMG.
 2. Drag `Local Flow` into `Programme`.
-3. Open Local Flow.
-4. On the first start, macOS may require right-clicking the app and selecting
-   `Open` because the current friend release is not Apple-notarized.
-5. Grant microphone and accessibility permissions.
-6. Wait while the selected speech model is downloaded once and verified.
+3. Open Local Flow. Because the friend release is not Apple-notarized, macOS
+   blocks the first start. Open System Settings, choose Privacy & Security,
+   scroll down to Security and click `Open Anyway` next to Local Flow.
+4. Grant microphone and accessibility permissions.
+5. Let the app prepare the selected speech engine once.
 
 After setup, transcription runs locally. Audio and transcripts are not sent
 to a transcription API.
@@ -26,24 +26,30 @@ to a transcription API.
 ## Features
 
 - configurable push-to-talk key, including `fn`/Globe
-- local German transcription with `whisper.cpp`
-- selectable Small Q5_1 and Large v3 Turbo Q5_0 models
+- double-tap the key for hands-free dictation, tap again to insert
+- `Esc` cancels a running recording, nothing is inserted
+- three local engines: Apple speech recognition (macOS 26, no download),
+  NVIDIA Parakeet v3 and Whisper Large v3 Turbo
+- optional clean-up with Apple Intelligence: removes filler words and fixes
+  punctuation on-device, switchable in the settings and the menu bar
+- personal dictionary: custom words (used directly by Whisper Turbo) and
+  replacement rules such as `neue Zeile = \n`
+- protection against Whisper's silence hallucinations: minimum recording
+  length, voice activity detection and a phrase filter
 - automatic, revision-pinned and checksum-verified model download
-- visible download progress and retry action
 - system-default or manually selected microphone
-- test recording
-- local history of the last five transcripts
+- test recording, local history of the last five transcripts
 - automatic paste with clipboard restoration
+- optional start and stop sounds, optional start at login
 - automatic update check with a direct link to the newest GitHub release
 - guided four-step first-run setup
-- compact native settings window with live recording and processing status
-- dynamic menu-bar feedback while recording and transcribing
-- native application icon
+- compact native settings window with live status and three tabs
+- dynamic menu-bar feedback while recording, transcribing and cleaning
 
 ## Requirements
 
 - Apple Silicon Mac
-- macOS 14 or newer
+- macOS 14 or newer; the Apple engine and the clean-up need macOS 26
 - internet connection for the one-time model download
 
 ## Development
@@ -54,20 +60,20 @@ swift test
 ./scripts/build-dmg.sh
 ```
 
-Release builds require Homebrew installations of `whisper-cpp`, `ggml`, and
-`libomp` on the build Mac. Users do not need Homebrew.
+Release builds require Xcode 26 and Homebrew installations of `whisper-cpp`,
+`ggml`, and `libomp` on the build Mac. Users do not need Homebrew.
 
 Read [CURRENT-STATE.md](CURRENT-STATE.md) before changing release behavior.
-Distribution details are in [DISTRIBUTION.md](DISTRIBUTION.md).
+Distribution details are in [DISTRIBUTION.md](DISTRIBUTION.md). Measured
+engine comparisons are in [AUDIT-2026-09.md](AUDIT-2026-09.md).
 
 The source code is publicly visible but is not open source. See [LICENSE](LICENSE).
 
 ## Privacy
 
-Recordings are created temporarily on the Mac and processed locally. The
-selected Whisper model is downloaded from the official `whisper.cpp`
-repository on Hugging Face at a fixed repository revision. See
-[SECURITY.md](SECURITY.md).
+Recordings are created temporarily on the Mac, processed locally and deleted
+right after transcription. Model files are downloaded from pinned Hugging
+Face revisions and checksum-verified. See [SECURITY.md](SECURITY.md).
 
 ## Current Limitation
 

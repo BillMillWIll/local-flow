@@ -43,16 +43,10 @@ enum EngineRuntime {
         throw LocalFlowError.missingWhisper
     }
 
-    /// ggml loads its Metal and CPU backends at runtime. Pointing it at the
-    /// bundled library folder keeps the app independent of Homebrew.
+    /// ggml loads its Metal and CPU backends at runtime and searches next to
+    /// the executable, which is why the build script places them in `bin`.
     static var environment: [String: String] {
-        var environment = ProcessInfo.processInfo.environment
-        if let libraryDirectory = bundledRuntimeDirectory?
-            .appendingPathComponent("lib", isDirectory: true),
-           FileManager.default.fileExists(atPath: libraryDirectory.path) {
-            environment["GGML_BACKEND_PATH"] = libraryDirectory.path
-        }
-        return environment
+        ProcessInfo.processInfo.environment
     }
 
     static func run(_ executableURL: URL, arguments: [String]) throws {

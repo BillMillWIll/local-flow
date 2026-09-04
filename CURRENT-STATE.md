@@ -9,108 +9,95 @@ in `docs/agent/`.
 ## Product
 
 - Native Swift 6 macOS application
-- Minimum system: macOS 14
+- Minimum system: macOS 14; Apple engine and clean-up need macOS 26
 - Architecture: Apple Silicon (`arm64`)
 - Bundle identifier: `de.artmotion.localflow`
 - Current version: read from `VERSION`
 - Intended distribution: friends and colleagues through GitHub Releases
+- Own Git repository at `~/Desktop/local-flow` since 2026-09-04; the ArtMotion
+  monorepo only keeps a reference stub
 
 ## Runtime Architecture
 
-- The app bundle includes `whisper-cli` and its required dynamic libraries.
-- Friends do not need Homebrew, Xcode, Swift, or Terminal.
-- Whisper models are not bundled in the DMG.
-- The selected model downloads automatically on first use from:
-  `ggerganov/whisper.cpp` on Hugging Face.
-- Every downloaded model is checked against a hard-coded SHA-256 checksum.
-- Model URLs are pinned to Hugging Face repository revision
-  `5359861c739e955e79d9a303bcbc70fb988958b1`.
-- The UI displays percentage progress and exposes a retry button after errors.
-- Models are stored in:
-  `~/Library/Application Support/LocalFlow/`
-- App settings and the last five transcripts are stored in macOS
-  `UserDefaults`.
-
-## Models
-
-- `ggml-small-q5_1.bin`, approximately 181 MB, default
-- `ggml-large-v3-turbo-q5_0.bin`, approximately 547 MB
-
-Only the selected missing model is downloaded. Existing verified models from
-older Local Flow installations remain usable.
+- Three recognition engines behind `TranscriptionEngine`
+  (`Sources/LocalFlow/Engines/`):
+  - `apple`: `SpeechAnalyzer`/`SpeechTranscriber` de-DE, macOS 26, no
+    download; default when supported.
+  - `parakeet`: `parakeet-cli` with `ggml-parakeet-tdt-0.6b-v3-q8_0.bin`
+    (670 MB); default on macOS 14/15.
+  - `whisperTurbo`: `whisper-cli` with `ggml-large-v3-turbo-q5_0.bin`
+    (550 MB) plus Silero VAD (1 MB); only engine that uses the custom word
+    prompt directly.
+- The app bundle includes `whisper-cli`, `parakeet-cli`, their libraries and
+  all ggml backends (`libggml-*.so`). ggml 0.20 searches Homebrew's
+  `libexec` first and then the tool's own folder, so the backends live next
+  to the tools in `whisper/bin`. The portable test verifies this with a
+  sandbox that hides `/opt/homebrew`.
+- Every downloaded model is pinned to a Hugging Face revision and checked
+  against a hard-coded SHA-256 checksum (`ModelCatalog` in
+  `LocalFlowCore/Engines.swift`).
+- Text pipeline after recognition: `TranscriptCleaner` (noise markers and
+  Whisper hallucination phrases) → replacement rules → optional
+  `TextCleanup` with the Foundation Models framework, guarded by
+  `CleanupGuard` so an implausible result falls back to the raw text.
+- Recording guards: recordings under 0.4 s are dropped as accidental taps,
+  recordings stop automatically after 5 minutes, `Esc` cancels.
+- Push-to-talk gestures: hold; double tap for hands-free; a menu item can
+  start and stop hands-free recording too (`PushToTalkState`,
+  `DoubleTapDetector`).
+- Recording WAV and tool output files are deleted after each dictation.
+- Models are stored in `~/Library/Application Support/LocalFlow/`.
+- App settings, dictionary and the last five transcripts are stored in macOS
+  `UserDefaults`. The pre-2.0 `whisperModel` key is migrated to
+  `recognitionEngine`.
 
 ## Main Files
 
-- `Sources/LocalFlow/main.swift`: AppKit UI, recording, downloads, Whisper
-  execution, history and paste behavior
-- `Sources/LocalFlowCore/LocalFlowCore.swift`: testable model metadata,
-  hotkey logic, state and transcript helpers
-- `Tests/LocalFlowCoreTests/`: automated tests
+- `Sources/LocalFlow/AppDelegate.swift`: menu bar, recording flow, engine
+  preparation, updates
+- `Sources/LocalFlow/SettingsWindowController.swift`: settings window with
+  the tabs Sprechen, Text, Erweitert
+- `Sources/LocalFlow/OnboardingWindowController.swift`: four-step setup
+- `Sources/LocalFlow/Engines/`: engine protocol, runtime lookup, Whisper,
+  Parakeet, Apple
+- `Sources/LocalFlow/TextCleanup.swift`: Apple Intelligence clean-up
+- `Sources/LocalFlow/SystemIntegration.swift`: sounds, login item
+- `Sources/LocalFlowCore/`: testable logic (engines, dictionary, gestures,
+  state machine, cleaner, history)
+- `Tests/LocalFlowCoreTests/`: automated tests (66)
 - `scripts/check-release.sh`: secret scan, tracked-file validation and tests
 - `scripts/build-app.sh`: portable application bundle
 - `scripts/build-dmg.sh`: final DMG and SHA-256 file
-- `scripts/test-portable-release.sh`: clean model-directory download and
-  bundled-runtime transcription test
-- `.github/workflows/release-check.yml`: fresh ARM64 macOS release validation
-- `DISTRIBUTION.md`: release procedure
-- `SECURITY.md`: privacy and reporting
+- `scripts/test-portable-release.sh`: bundled-runtime check (backends load
+  from the bundle), pinned downloads and, locally, real inference with both
+  command-line tools
+- `.github/workflows/release-check.yml`: fresh ARM64 macOS 26 release check
+- `AUDIT-2026-09.md`: measured engine comparison behind the 2.0 decisions
 
 ## Release State
 
-- Portable bundle no longer requires Homebrew on the recipient Mac.
-- The native settings UI is organized around a live activity status, compact
-  speaking controls, a primary recording test, permission health and a
-  collapsible advanced area.
-- First launch uses a four-step onboarding assistant for microphone,
-  accessibility, model installation and a test recording.
-- Failed model downloads return the onboarding assistant to an explicit retry
-  state instead of leaving it stuck on a loading message.
-- Manual microphone selections use a versioned, delimiter-safe stored format;
-  legacy selections remain readable.
-- Temporary microphone switching is rolled back even when recorder setup
-  fails.
-- Automatic text insertion restores the previous clipboard only while Local
-  Flow still owns the temporary clipboard contents, so newer user copies are
-  preserved.
-- The menu-bar icon changes color and symbol with ready, recording,
-  processing, download, success and error states, and pulses while recording.
-- DMG generation is implemented.
-- The DMG uses a fixed compact 660 x 540 Finder layout with a branded
-  background, drag arrow and German installation instruction.
-- The DMG lists the complete manual Gatekeeper approval flow in order without
-  an additional helper file or PREF icon.
-- Release artifacts are generated under `dist/` and are ignored by Git.
-- Current signature is ad-hoc.
-- Apple notarization is not configured.
-- There is no automatic updater yet; updates are installed by replacing the
-  application with the newer DMG.
-- The app checks GitHub Releases automatically and links directly to a newer
-  DMG when available.
-- Models, settings and transcript history survive app replacement.
-- The app has a generated native icon.
-- Complete `whisper.cpp`, `ggml`, and `libomp` license texts are included.
-- Local Flow source and release use are governed by the repository `LICENSE`.
-- GitHub's virtualized ARM64 runner validates the clean download, checksum,
-  executable runtime and DMG. Actual audio inference is tested locally because
-  `whisper.cpp` inference is unstable inside GitHub's macOS virtualization.
+- 2.0.0 is the first release with engine selection, clean-up, dictionary,
+  hands-free mode and the hallucination guards.
+- 1.2.1 bundled whisper.cpp 1.8.6 with ggml 0.15.1, which linked its
+  backends statically. Builds against ggml 0.20 need the bundled `.so`
+  backends, otherwise the tools only work on Macs with Homebrew.
+- Current signature is ad-hoc; Apple notarization is not configured.
+- There is no automatic updater; the app links to the newest GitHub release.
+- The GitHub runner (`macos-26`) validates build, bundled backends, the VAD
+  download and the DMG. Real inference is tested locally.
 
 ## Safety Rules
 
 - Never commit models, recordings, DMGs, private keys, signing certificates,
   `.env` files or credentials.
 - Run `./scripts/check-release.sh` before every release.
-- Keep Local Flow in its own Git repository. Do not publish the parent
-  workspace repository.
 - Do not add analytics, cloud transcription or external APIs without an
   explicit product decision and privacy review.
 
 ## Next Sensible Steps
 
-Measured findings and engine comparison (Whisper, Parakeet, Apple
-SpeechTranscriber, Foundation Models) are in `AUDIT-2026-09.md`.
-
-
-1. Confirm first-run microphone and accessibility interaction with a friend.
+1. Confirm the Apple engine and the clean-up with real microphone speech on
+   a second Mac.
 2. Add Developer ID signing and notarization if distribution expands.
 3. Consider Sparkle only when browser-based update installation becomes
    inconvenient.

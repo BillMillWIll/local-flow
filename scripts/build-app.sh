@@ -32,11 +32,27 @@ rm -rf "$APP_DIR"
 mkdir -p "$MACOS_DIR" "$WHISPER_BIN_DIR" "$WHISPER_LIB_DIR" "$LICENSES_DIR"
 cp ".build/release/LocalFlow" "$MACOS_DIR/LocalFlow"
 cp -L "$WHISPER_PREFIX/bin/whisper-cli" "$WHISPER_BIN_DIR/whisper-cli"
+cp -L "$WHISPER_PREFIX/bin/parakeet-cli" "$WHISPER_BIN_DIR/parakeet-cli"
 cp -L "$WHISPER_PREFIX/lib/libwhisper.1.dylib" "$WHISPER_LIB_DIR/libwhisper.1.dylib"
+cp -L "$WHISPER_PREFIX/lib/libparakeet.1.dylib" "$WHISPER_LIB_DIR/libparakeet.1.dylib"
+# ggml >= 0.20 lädt Metal- und CPU-Backends zur Laufzeit aus einzelnen
+# Bibliotheken. ggml sucht sie zuerst im einkompilierten Homebrew-Ordner und
+# dann neben dem ausführenden Programm. Ohne sie im Bundle fände die App auf
+# Macs ohne Homebrew kein Rechen-Backend, deshalb liegen sie neben den Tools.
+GGML_BACKENDS=()
+for backend in "$GGML_PREFIX"/libexec/libggml-*.so; do
+    [[ -f "$backend" ]] || continue
+    cp -L "$backend" "$WHISPER_BIN_DIR/$(basename "$backend")"
+    GGML_BACKENDS+=("$WHISPER_BIN_DIR/$(basename "$backend")")
+done
+if [[ ${#GGML_BACKENDS[@]} -eq 0 ]]; then
+    echo "Abbruch: Keine ggml-Backends unter $GGML_PREFIX/libexec gefunden." >&2
+    exit 1
+fi
 cp -L "$GGML_PREFIX/lib/libggml.0.dylib" "$WHISPER_LIB_DIR/libggml.0.dylib"
 cp -L "$GGML_PREFIX/lib/libggml-base.0.dylib" "$WHISPER_LIB_DIR/libggml-base.0.dylib"
 cp -L "$LIBOMP_PREFIX/lib/libomp.dylib" "$WHISPER_LIB_DIR/libomp.dylib"
-chmod u+w "$WHISPER_LIB_DIR/"*.dylib
+chmod u+w "$WHISPER_LIB_DIR/"*.dylib "$WHISPER_BIN_DIR/"*.so
 cp "$WHISPER_PREFIX/LICENSE" "$LICENSES_DIR/whisper.cpp-LICENSE.txt"
 cp "$GGML_PREFIX/LICENSE" "$LICENSES_DIR/ggml-LICENSE.txt"
 cp "$ROOT_DIR/ThirdParty/libomp-LICENSE.txt" "$LICENSES_DIR/libomp-LICENSE.txt"
@@ -57,12 +73,31 @@ done
 iconutil -c icns "$ICONSET_DIR" -o "$RESOURCES_DIR/LocalFlow.icns"
 rm -rf "$ICONSET_DIR"
 
-chmod 755 "$WHISPER_BIN_DIR/whisper-cli"
+chmod 755 "$WHISPER_BIN_DIR/whisper-cli" "$WHISPER_BIN_DIR/parakeet-cli"
 
+for tool in whisper-cli parakeet-cli; do
+    install_name_tool \
+        -change "$GGML_PREFIX/lib/libggml.0.dylib" "@rpath/libggml.0.dylib" \
+        -change "$GGML_PREFIX/lib/libggml-base.0.dylib" "@rpath/libggml-base.0.dylib" \
+        -change "$WHISPER_PREFIX/lib/libparakeet.1.dylib" "@rpath/libparakeet.1.dylib" \
+        -change "$WHISPER_PREFIX/lib/libwhisper.1.dylib" "@rpath/libwhisper.1.dylib" \
+        "$WHISPER_BIN_DIR/$tool"
+done
 install_name_tool \
+    -id "@rpath/libparakeet.1.dylib" \
     -change "$GGML_PREFIX/lib/libggml.0.dylib" "@rpath/libggml.0.dylib" \
     -change "$GGML_PREFIX/lib/libggml-base.0.dylib" "@rpath/libggml-base.0.dylib" \
-    "$WHISPER_BIN_DIR/whisper-cli"
+    "$WHISPER_LIB_DIR/libparakeet.1.dylib"
+for backend in "${GGML_BACKENDS[@]}"; do
+    install_name_tool \
+        -id "@rpath/$(basename "$backend")" \
+        -change "$GGML_PREFIX/lib/libggml.0.dylib" "@rpath/libggml.0.dylib" \
+        -change "$GGML_PREFIX/lib/libggml-base.0.dylib" "@rpath/libggml-base.0.dylib" \
+        -change "$LIBOMP_PREFIX/lib/libomp.dylib" "@rpath/libomp.dylib" \
+        "$backend"
+    # Backends werden per dlopen geladen; ihre @rpath-Verweise auf libggml
+    # löst der Suchpfad des Tools (@loader_path/../lib) auf.
+done
 install_name_tool \
     -id "@rpath/libwhisper.1.dylib" \
     -change "$GGML_PREFIX/lib/libggml.0.dylib" "@rpath/libggml.0.dylib" \
@@ -106,6 +141,8 @@ cat > "$CONTENTS_DIR/Info.plist" <<'PLIST'
     <string>public.app-category.productivity</string>
     <key>NSMicrophoneUsageDescription</key>
     <string>Local Flow benötigt das Mikrofon für die lokale Spracheingabe.</string>
+    <key>NSSpeechRecognitionUsageDescription</key>
+    <string>Local Flow nutzt die Spracherkennung von macOS, um Diktate lokal in Text umzuwandeln.</string>
 </dict>
 </plist>
 PLIST
@@ -119,7 +156,12 @@ codesign --force --sign - "$WHISPER_LIB_DIR/libomp.dylib"
 codesign --force --sign - "$WHISPER_LIB_DIR/libggml-base.0.dylib"
 codesign --force --sign - "$WHISPER_LIB_DIR/libggml.0.dylib"
 codesign --force --sign - "$WHISPER_LIB_DIR/libwhisper.1.dylib"
+codesign --force --sign - "$WHISPER_LIB_DIR/libparakeet.1.dylib"
+for backend in "${GGML_BACKENDS[@]}"; do
+    codesign --force --sign - "$backend"
+done
 codesign --force --sign - "$WHISPER_BIN_DIR/whisper-cli"
+codesign --force --sign - "$WHISPER_BIN_DIR/parakeet-cli"
 
 codesign \
     --force \
