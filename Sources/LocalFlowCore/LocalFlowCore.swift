@@ -12,10 +12,14 @@ public enum LocalFlowActivity: Equatable, Sendable {
     case ready(keyTitle: String)
     case recording
     case testRecording
+    case handsFreeRecording
     case processing
+    case cleaning
     case downloadingModel(Int?)
     case success(String)
     case failure(String)
+    case cancelled
+    case tooShort
 
     public var title: String {
         switch self {
@@ -23,6 +27,14 @@ public enum LocalFlowActivity: Equatable, Sendable {
             return "Bereit"
         case .recording:
             return "Aufnahme läuft"
+        case .handsFreeRecording:
+            return "Freihändige Aufnahme"
+        case .cleaning:
+            return "Wird bereinigt"
+        case .cancelled:
+            return "Abgebrochen"
+        case .tooShort:
+            return "Zu kurz"
         case .testRecording:
             return "Testaufnahme läuft"
         case .processing:
@@ -40,7 +52,15 @@ public enum LocalFlowActivity: Equatable, Sendable {
         case .ready(let keyTitle):
             return "\(keyTitle) halten und sprechen"
         case .recording:
-            return "Loslassen, um den Text einzufügen"
+            return "Loslassen, um den Text einzufügen · Esc bricht ab"
+        case .handsFreeRecording:
+            return "Sprechtaste erneut tippen, um einzufügen · Esc bricht ab"
+        case .cleaning:
+            return "Apple Intelligence glättet den Text"
+        case .cancelled:
+            return "Nichts eingefügt"
+        case .tooShort:
+            return "Taste halten und sprechen oder doppelt tippen"
         case .testRecording:
             return "Vier Sekunden sprechen"
         case .processing:
@@ -58,10 +78,14 @@ public enum LocalFlowActivity: Equatable, Sendable {
         switch self {
         case .ready:
             return "mic.fill"
-        case .recording, .testRecording:
+        case .recording, .testRecording, .handsFreeRecording:
             return "waveform.circle.fill"
-        case .processing:
+        case .processing, .cleaning:
             return "ellipsis.circle.fill"
+        case .cancelled:
+            return "xmark.circle.fill"
+        case .tooShort:
+            return "hand.raised.fill"
         case .downloadingModel:
             return "arrow.down.circle.fill"
         case .success:
@@ -75,19 +99,21 @@ public enum LocalFlowActivity: Equatable, Sendable {
         switch self {
         case .ready:
             return .neutral
-        case .recording, .testRecording:
+        case .recording, .testRecording, .handsFreeRecording:
             return .recording
-        case .processing, .downloadingModel:
+        case .processing, .cleaning, .downloadingModel:
             return .accent
         case .success:
             return .success
-        case .failure:
+        case .failure, .tooShort:
             return .warning
+        case .cancelled:
+            return .neutral
         }
     }
 
     public var isPulsing: Bool {
-        self == .recording || self == .testRecording
+        self == .recording || self == .testRecording || self == .handsFreeRecording
     }
 }
 
@@ -637,15 +663,35 @@ public enum TranscriptCleaner {
         "(Musik)"
     ]
 
+    /// Phrases Whisper invents for silence or very short audio. They come
+    /// from subtitle credits in its training data and never from the user.
+    static let hallucinationPatterns = [
+        "Untertitel(ung)? der Amara\\.org[\\p{L}\\- ]*",
+        "Untertitel(ung)? von Stephanie Geiges",
+        "Untertitel(ung)?\\s+(im Auftrag )?(des|der|von|durch)\\s+[\\p{L}\\- ]+(,?\\s*\\d{4})?",
+        "Copyright (WDR|ZDF|SWR|NDR|BR|MDR|ARD)\\s*\\d{4}",
+        "Vielen Dank f(ü|ue)rs? Zuschauen[.!]?",
+        "Bis zum n(ä|ae)chsten Mal[.!]?$"
+    ]
+
     public static func clean(_ transcript: String) -> String {
         let withoutNoise = noiseMarkers.reduce(transcript) { text, marker in
             text.replacingOccurrences(of: marker, with: " ")
         }
 
-        return withoutNoise
+        let withoutHallucinations = hallucinationPatterns.reduce(withoutNoise) { text, pattern in
+            text.replacingOccurrences(
+                of: pattern,
+                with: " ",
+                options: [.regularExpression, .caseInsensitive]
+            )
+        }
+
+        return withoutHallucinations
             .components(separatedBy: .whitespacesAndNewlines)
             .filter { !$0.isEmpty }
             .joined(separator: " ")
+            .replacingOccurrences(of: "^[\\s.,;:]+", with: "", options: .regularExpression)
     }
 }
 
@@ -654,28 +700,42 @@ public struct WhisperInvocation: Sendable {
     public let audioPath: String
     public let outputPath: String
     public let language: String
+    public let prompt: String?
+    public let vadModelPath: String?
 
     public init(
         modelPath: String,
         audioPath: String,
         outputPath: String,
-        language: String = "de"
+        language: String = "de",
+        prompt: String? = nil,
+        vadModelPath: String? = nil
     ) {
         self.modelPath = modelPath
         self.audioPath = audioPath
         self.outputPath = outputPath
         self.language = language
+        self.prompt = prompt
+        self.vadModelPath = vadModelPath
     }
 
     public var arguments: [String] {
-        [
+        var arguments = [
             "-m", modelPath,
             "-f", audioPath,
             "-l", language,
             "-otxt",
             "-of", outputPath,
-            "-np"
+            "-np",
+            "--suppress-nst"
         ]
+        if let vadModelPath {
+            arguments += ["--vad", "--vad-model", vadModelPath]
+        }
+        if let prompt, !prompt.isEmpty {
+            arguments += ["--prompt", prompt]
+        }
+        return arguments
     }
 }
 
@@ -695,16 +755,27 @@ public struct PushToTalkState: Sendable {
     }
 
     private var phase: Phase = .idle
+    public private(set) var isHandsFree = false
 
     public init() {}
 
+    public var isRecording: Bool {
+        phase == .starting || phase == .recording || phase == .waitingToStop
+    }
+
     public mutating func press() -> Action {
+        if isHandsFree, phase == .recording {
+            phase = .processing
+            isHandsFree = false
+            return .stopRecording
+        }
         guard phase == .idle else { return .none }
         phase = .starting
         return .startRecording
     }
 
     public mutating func release() -> Action {
+        if isHandsFree { return .none }
         switch phase {
         case .starting:
             phase = .waitingToStop
@@ -715,6 +786,28 @@ public struct PushToTalkState: Sendable {
         case .idle, .waitingToStop, .processing:
             return .none
         }
+    }
+
+    /// Keeps the current recording running after the key is released.
+    public mutating func enableHandsFree() {
+        guard phase == .starting || phase == .recording else { return }
+        isHandsFree = true
+    }
+
+    /// Ends the current recording without transcribing.
+    public mutating func cancel() -> Bool {
+        guard isRecording else { return false }
+        phase = .idle
+        isHandsFree = false
+        return true
+    }
+
+    /// Ends a running recording from outside (time limit, menu).
+    public mutating func stop() -> Action {
+        guard phase == .recording else { return .none }
+        phase = .processing
+        isHandsFree = false
+        return .stopRecording
     }
 
     public mutating func recordingDidStart() -> Action {
@@ -732,9 +825,11 @@ public struct PushToTalkState: Sendable {
 
     public mutating func recordingDidFail() {
         phase = .idle
+        isHandsFree = false
     }
 
     public mutating func processingDidFinish() {
         phase = .idle
+        isHandsFree = false
     }
 }

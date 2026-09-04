@@ -14,7 +14,8 @@ import Testing
         "-l", "de",
         "-otxt",
         "-of", "/tmp/result",
-        "-np"
+        "-np",
+        "--suppress-nst"
     ])
 }
 
