@@ -54,13 +54,26 @@ enum TextCleanup {
         return .unavailable("Braucht macOS 26 mit Apple Intelligence.")
     }
 
+    /// Loads the model ahead of the first dictation so the clean-up does not
+    /// pay the start-up cost while the user waits.
+    static func prewarm() {
+        #if canImport(FoundationModels)
+        if #available(macOS 26.0, *), availability().isAvailable {
+            Task.detached(priority: .utility) {
+                await SessionStore.shared.prepareNext()
+            }
+        }
+        #endif
+    }
+
     /// Returns the cleaned text, or the original whenever the model is
     /// unavailable, refuses, or produces something implausible.
     static func clean(_ text: String) async -> String {
         #if canImport(FoundationModels)
         if #available(macOS 26.0, *), availability().isAvailable {
+            let session = await SessionStore.shared.take()
+            defer { Task.detached(priority: .utility) { await SessionStore.shared.prepareNext() } }
             do {
-                let session = LanguageModelSession(instructions: instructions)
                 let response = try await session.respond(
                     to: "Text:\n\(text)",
                     options: GenerationOptions(temperature: 0)
@@ -73,4 +86,27 @@ enum TextCleanup {
         #endif
         return text
     }
+
+    #if canImport(FoundationModels)
+    /// Every dictation gets a fresh session so earlier texts never leak into
+    /// the next result. The next session is prepared in advance, which keeps
+    /// the model and the instruction prefix warm.
+    @available(macOS 26.0, *)
+    private actor SessionStore {
+        static let shared = SessionStore()
+        private var next: LanguageModelSession?
+
+        func take() -> LanguageModelSession {
+            defer { next = nil }
+            return next ?? LanguageModelSession(instructions: TextCleanup.instructions)
+        }
+
+        func prepareNext() {
+            guard next == nil else { return }
+            let session = LanguageModelSession(instructions: TextCleanup.instructions)
+            session.prewarm()
+            next = session
+        }
+    }
+    #endif
 }

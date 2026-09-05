@@ -20,9 +20,14 @@ final class AudioRecorder {
             try switchDefaultInputDevice(to: deviceID)
         }
 
+        if let previous = recorder {
+            previous.stop()
+            self.recorder = nil
+            try? FileManager.default.removeItem(at: previous.url)
+        }
+
         do {
-            let url = Self.recordingURL
-            try? FileManager.default.removeItem(at: url)
+            let url = Self.makeRecordingURL()
 
             let settings: [String: Any] = [
                 AVFormatIDKey: kAudioFormatLinearPCM,
@@ -56,10 +61,12 @@ final class AudioRecorder {
     }
 
     func cancel() {
-        recorder?.stop()
+        if let recorder {
+            recorder.stop()
+            Self.discard(recorder.url)
+        }
         recorder = nil
         restoreDefaultInputDevice()
-        Self.discardRecording()
     }
 
     /// Seconds recorded so far, 0 when idle.
@@ -68,8 +75,17 @@ final class AudioRecorder {
     }
 
     /// Recordings are private; nothing stays on disk after a dictation.
-    static func discardRecording() {
-        try? FileManager.default.removeItem(at: recordingURL)
+    static func discard(_ url: URL) {
+        try? FileManager.default.removeItem(at: url)
+    }
+
+    /// Removes leftovers from crashed or force-quit sessions.
+    static func discardAllRecordings() {
+        let directory = FileManager.default.temporaryDirectory
+        let files = (try? FileManager.default.contentsOfDirectory(atPath: directory.path)) ?? []
+        for file in files where file.hasPrefix("local-flow-recording") && file.hasSuffix(".wav") {
+            try? FileManager.default.removeItem(at: directory.appendingPathComponent(file))
+        }
     }
 
     private func switchDefaultInputDevice(to uniqueID: String) throws {
@@ -207,8 +223,8 @@ final class AudioRecorder {
         return status == noErr ? uid as? String : nil
     }
 
-    private static var recordingURL: URL {
+    private static func makeRecordingURL() -> URL {
         FileManager.default.temporaryDirectory
-            .appendingPathComponent("local-flow-recording.wav")
+            .appendingPathComponent("local-flow-recording-\(UUID().uuidString).wav")
     }
 }

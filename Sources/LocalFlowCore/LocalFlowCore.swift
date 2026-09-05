@@ -668,7 +668,8 @@ public enum TranscriptCleaner {
     static let hallucinationPatterns = [
         "Untertitel(ung)? der Amara\\.org[\\p{L}\\- ]*",
         "Untertitel(ung)? von Stephanie Geiges",
-        "Untertitel(ung)?\\s+(im Auftrag )?(des|der|von|durch)\\s+[\\p{L}\\- ]+(,?\\s*\\d{4})?",
+        "Untertitel(ung)?\\s+(im Auftrag )?(des|der|von|durch)\\s+(ZDF|WDR|SWR|NDR|BR|MDR|ARD|ORF|SRF|3sat|arte|funk|Phoenix|KiKA)[\\p{L}]*(,?\\s*(19|20)\\d{2})?",
+        "Untertitel(ung)?\\s+(im Auftrag )?(des|der|von|durch)\\s+[\\p{L}\\-]+(\\s+[\\p{L}\\-]+){0,2},?\\s*(19|20)\\d{2}",
         "Copyright (WDR|ZDF|SWR|NDR|BR|MDR|ARD)\\s*\\d{4}",
         "Vielen Dank f(ü|ue)rs? Zuschauen[.!]?",
         "Bis zum n(ä|ae)chsten Mal[.!]?$"
@@ -763,6 +764,14 @@ public struct PushToTalkState: Sendable {
         phase == .starting || phase == .recording || phase == .waitingToStop
     }
 
+    public var isProcessing: Bool {
+        phase == .processing
+    }
+
+    public var isIdle: Bool {
+        phase == .idle
+    }
+
     public mutating func press() -> Action {
         if isHandsFree, phase == .recording {
             phase = .processing
@@ -788,10 +797,19 @@ public struct PushToTalkState: Sendable {
         }
     }
 
-    /// Keeps the current recording running after the key is released.
+    /// Keeps the current recording running after the key is released. A
+    /// second tap that arrives while the recorder is still starting up turns
+    /// that pending recording into a hands-free one instead of stopping it.
     public mutating func enableHandsFree() {
-        guard phase == .starting || phase == .recording else { return }
-        isHandsFree = true
+        switch phase {
+        case .starting, .recording:
+            isHandsFree = true
+        case .waitingToStop:
+            phase = .starting
+            isHandsFree = true
+        case .idle, .processing:
+            return
+        }
     }
 
     /// Ends the current recording without transcribing.

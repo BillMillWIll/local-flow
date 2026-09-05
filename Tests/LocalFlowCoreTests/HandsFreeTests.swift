@@ -76,3 +76,19 @@ import Testing
     #expect(LocalFlowActivity.cancelled.title == "Abgebrochen")
     #expect(LocalFlowActivity.tooShort.tone == .warning)
 }
+
+@Test func secondTapWhileStartingTurnsPendingRecordingHandsFree() {
+    var state = PushToTalkState()
+
+    _ = state.press()
+    #expect(state.release() == .none)
+    state.enableHandsFree()
+    #expect(state.isHandsFree)
+    #expect(state.recordingDidStart() == .none)
+    #expect(state.isRecording)
+    #expect(state.press() == .stopRecording)
+    #expect(state.isProcessing)
+    state.processingDidFinish()
+    #expect(state.isIdle)
+}
+

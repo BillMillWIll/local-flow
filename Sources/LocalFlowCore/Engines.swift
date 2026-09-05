@@ -76,11 +76,11 @@ public enum RecognitionEngine: String, CaseIterable, Sendable {
     public var title: String {
         switch self {
         case .apple:
-            return "Apple – schnell, ohne Download"
+            return "Apple – neu, empfohlen"
         case .parakeet:
-            return "Parakeet – schnell, 670 MB"
+            return "Parakeet – neu, für Macs vor macOS 26"
         case .whisperTurbo:
-            return "Whisper Turbo – genau, versteht eigene Wörter"
+            return "Whisper Turbo – bisherige Erkennung"
         }
     }
 
@@ -98,11 +98,11 @@ public enum RecognitionEngine: String, CaseIterable, Sendable {
     public var detail: String {
         switch self {
         case .apple:
-            return "Spracherkennung von macOS 26, läuft komplett auf diesem Mac."
+            return "Die Spracherkennung von macOS 26. Am schnellsten, kein Download, erfindet bei Stille nichts. Eigene Wörter wirken nur über Ersetzungen."
         case .parakeet:
-            return "NVIDIA Parakeet v3, läuft lokal. Eigene Wörter wirken über Ersetzungen."
+            return "NVIDIA-Modell, läuft lokal. Fast so schnell wie Apple, braucht einmalig 670 MB. Eigene Wörter wirken nur über Ersetzungen."
         case .whisperTurbo:
-            return "Whisper Large v3 Turbo, läuft lokal. Etwas langsamer, nutzt eigene Wörter direkt."
+            return "Das Modell aus Version 1.x. Etwas langsamer, versteht eigene Wörter aus dem Tab „Text“ direkt."
         }
     }
 

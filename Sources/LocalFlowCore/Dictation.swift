@@ -98,7 +98,18 @@ public enum CleanupGuard {
     /// Accepts an LLM-cleaned transcript only when it is plausibly the same
     /// text; otherwise the raw transcript is kept so nothing is lost.
     public static func accept(original: String, cleaned: String) -> String {
-        let trimmed = cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
+        var trimmed = cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Models sometimes echo the prompt label or wrap the answer in quotes.
+        if let range = trimmed.range(of: "^Text:\\s*", options: .regularExpression) {
+            trimmed.removeSubrange(range)
+        }
+        let quotePairs: [(Character, Character)] = [("\"", "\""), ("„", "“"), ("“", "”"), ("»", "«"), ("«", "»")]
+        for (open, close) in quotePairs
+        where trimmed.count > 1 && trimmed.first == open && trimmed.last == close
+            && !original.hasPrefix(String(open)) {
+            trimmed = String(trimmed.dropFirst().dropLast())
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+        }
         guard !trimmed.isEmpty else { return original }
 
         let originalCount = Double(original.count)

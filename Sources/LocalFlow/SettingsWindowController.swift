@@ -399,7 +399,7 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate, N
             settingRow(label: "Sprechtaste", control: keyRow),
             indented(keyHint),
             settingRow(label: "Mikrofon", control: microphonePopup),
-            settingRow(label: "Erkennung", control: enginePopup),
+            settingRow(label: "Spracherkennung", control: enginePopup),
             indented(engineDetailLabel),
             downloadProgress,
             retryDownloadButton,

@@ -60,4 +60,13 @@ import Testing
     #expect(TranscriptCleaner.clean("Bis morgen dann. Untertitelung des ZDF, 2020") == "Bis morgen dann.")
     #expect(TranscriptCleaner.clean("Vielen Dank für deine Nachricht.") == "Vielen Dank für deine Nachricht.")
     #expect(TranscriptCleaner.clean("Wir untertiteln das Video morgen.") == "Wir untertiteln das Video morgen.")
+    #expect(TranscriptCleaner.clean("Die Untertitel von Max schicken wir morgen an den Kunden.") == "Die Untertitel von Max schicken wir morgen an den Kunden.")
+    #expect(TranscriptCleaner.clean("Untertitel von Max Mustermann 2021") == "")
+}
+
+@Test func stripsPromptEchoAndQuotesFromCleanup() {
+    let original = "ich schicke dir morgen die Shotlist für die neue Folge"
+    #expect(CleanupGuard.accept(original: original, cleaned: "Text: Ich schicke dir morgen die Shotlist für die neue Folge.") == "Ich schicke dir morgen die Shotlist für die neue Folge.")
+    #expect(CleanupGuard.accept(original: original, cleaned: "„Ich schicke dir morgen die Shotlist für die neue Folge.“") == "Ich schicke dir morgen die Shotlist für die neue Folge.")
+    #expect(CleanupGuard.accept(original: "\"Zitat\" bleibt", cleaned: "\"Zitat\" bleibt") == "\"Zitat\" bleibt")
 }

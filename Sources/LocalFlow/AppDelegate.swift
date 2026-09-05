@@ -51,7 +51,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var onboardingTestCompleted = false
     private var appleGermanInstalled = false
     private var deferredStatusReset = DeferredReset()
-    private var recordingStartedAt: TimeInterval?
     private var maximumDurationTask: Task<Void, Never>?
     private var currentActivity = LocalFlowActivity.ready(keyTitle: "")
 
@@ -106,7 +105,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
-        AudioRecorder.discardRecording()
+        AudioRecorder.discardAllRecordings()
     }
 
     private func loadSettings() {
@@ -122,6 +121,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         replacementRulesText = defaults.string(forKey: Keys.replacementRules) ?? ReplacementRules.defaultText
         cleanupEnabled = defaults.bool(forKey: Keys.cleanupEnabled) && TextCleanup.availability().isAvailable
         soundsEnabled = !defaults.bool(forKey: Keys.soundsDisabled)
+        if cleanupEnabled {
+            TextCleanup.prewarm()
+        }
     }
 
     // MARK: - Menu bar
@@ -293,7 +295,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         hotkeyMonitor?.updateKey(key)
         doubleTap.reset()
         settingsWindowController?.setSelectedKey(key)
-        setActivity(readyActivity)
+        showReadyIfIdle()
     }
 
     private func changeEngine(to engine: RecognitionEngine) {
@@ -301,22 +303,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         defaults.set(engine.rawValue, forKey: Keys.recognitionEngine)
         settingsWindowController?.setModelDownloadProgress(nil)
         refreshOnboarding()
-        setActivity(readyActivity)
+        showReadyIfIdle()
         Task { await prepareSelectedEngineIfNeeded() }
     }
 
     private func changeMicrophone(to microphone: MicrophoneSelection) {
         selectedMicrophone = microphone
         defaults.set(microphone.rawValue, forKey: Keys.microphoneSelection)
-        setActivity(readyActivity)
+        showReadyIfIdle()
     }
 
     private func setCleanupEnabled(_ enabled: Bool) {
         cleanupEnabled = enabled && TextCleanup.availability().isAvailable
         defaults.set(cleanupEnabled, forKey: Keys.cleanupEnabled)
+        if cleanupEnabled {
+            TextCleanup.prewarm()
+        }
         settingsWindowController?.setCleanupEnabled(cleanupEnabled)
         updateCleanupMenuItem()
-        setActivity(readyActivity)
+        showReadyIfIdle()
     }
 
     private func setLoginItemEnabled(_ enabled: Bool) {
@@ -341,6 +346,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if pushToTalkState.press() == .stopRecording {
                 stopAndTranscribe(destination: .paste)
             }
+            return
+        }
+
+        if isDoubleTap, pushToTalkState.isRecording {
+            // The first tap's recording is still starting; keep it running.
+            pushToTalkState.enableHandsFree()
+            setActivity(.handsFreeRecording)
             return
         }
 
@@ -371,8 +383,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 // Der Ton läuft vor der Aufnahme, sonst landet er im Transkript.
                 await playSoundAndWait(.start)
                 try await recorder.start(microphone: selectedMicrophone)
-                recordingStartedAt = now
+                guard pushToTalkState.isRecording else {
+                    // Cancelled with Esc while the recorder was starting.
+                    recorder.cancel()
+                    return
+                }
                 scheduleMaximumDuration()
+                if pushToTalkState.isHandsFree {
+                    setActivity(.handsFreeRecording)
+                }
                 if pushToTalkState.recordingDidStart() == .stopRecording {
                     stopAndTranscribe(destination: .paste)
                 }
@@ -416,7 +435,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard pushToTalkState.cancel() else { return }
         maximumDurationTask?.cancel()
         recorder.cancel()
-        recordingStartedAt = nil
         doubleTap.reset()
         playSound(.cancel)
         setActivity(.cancelled)
@@ -439,7 +457,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             do {
                 await playSoundAndWait(.start)
                 try await recorder.start(microphone: selectedMicrophone)
-                recordingStartedAt = now
                 try await Task.sleep(for: .seconds(4))
                 stopAndTranscribe(destination: .test)
             } catch {
@@ -457,14 +474,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func stopAndTranscribe(destination: TranscriptionDestination) {
         maximumDurationTask?.cancel()
         let duration = recorder.currentDuration
-        recordingStartedAt = nil
 
         do {
             let audioURL = try recorder.stop()
             playSound(.stop)
 
             if destination == .paste, !RecordingGuard.isLongEnough(duration) {
-                AudioRecorder.discardRecording()
+                AudioRecorder.discard(audioURL)
                 finishProcessing(destination: destination)
                 setActivity(.tooShort)
                 resetStatusSoon()
@@ -495,11 +511,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 } catch {
                     result = .failure(error)
                 }
-                AudioRecorder.discardRecording()
+                AudioRecorder.discard(audioURL)
                 handleTranscription(result, destination: destination)
             }
         } catch {
-            AudioRecorder.discardRecording()
             finishProcessing(destination: destination)
             show(error)
         }
@@ -663,6 +678,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             settingsWindowController?.setEngineDetail(error.localizedDescription)
             show(error)
         }
+
+        if selectedEngine != engine {
+            // The user switched engines while this one was downloading.
+            Task { await prepareSelectedEngineIfNeeded() }
+        }
     }
 
     // MARK: - Updates
@@ -721,11 +741,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func playSoundAndWait(_ kind: SoundFeedback.Kind) async {
         guard soundsEnabled else { return }
         SoundFeedback.play(kind)
-        try? await Task.sleep(for: .milliseconds(220))
+        try? await Task.sleep(for: .milliseconds(120))
     }
 
     private var readyActivity: LocalFlowActivity {
         .ready(keyTitle: selectedKey.title)
+    }
+
+    /// Settings changes refresh the ready line, but never while a dictation
+    /// or a test recording is in progress.
+    private func showReadyIfIdle() {
+        guard pushToTalkState.isIdle, !isTestRecording, !isInstallingModel else { return }
+        if case .ready = currentActivity {
+            setActivity(readyActivity)
+        }
     }
 
     private var readyText: String {

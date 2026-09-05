@@ -85,6 +85,13 @@ in `docs/agent/`.
 
 - 2.0.0 is the first release with engine selection, clean-up, dictionary,
   hands-free mode and the hallucination guards.
+- 2.0.1 fixes review findings: a double tap during recorder start-up now
+  becomes hands-free instead of being swallowed, `Esc` during start-up no
+  longer leaves the microphone running, the hallucination filter only removes
+  known broadcaster credits or phrases with a year, switching engines during
+  a download prepares the new engine afterwards, each recording uses its own
+  temporary file, and the clean-up model is pre-warmed while enabled. Engine
+  names say which one is new and which one is the previous recognition.
 - 1.2.1 bundled whisper.cpp 1.8.6 with ggml 0.15.1, which linked its
   backends statically. Builds against ggml 0.20 need the bundled `.so`
   backends, otherwise the tools only work on Macs with Homebrew.
