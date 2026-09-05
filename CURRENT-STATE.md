@@ -51,6 +51,8 @@ in `docs/agent/`.
   (`build-app.sh`), because a Mac with Homebrew would otherwise load foreign
   backends and crash in the VAD path.
 - Recording WAV and tool output files are deleted after each dictation.
+- The start sound plays before the recorder starts and the stop sound after
+  it stops; otherwise the Apple engine transcribes the sound as a word.
 - Models are stored in `~/Library/Application Support/LocalFlow/`.
 - App settings, dictionary and the last five transcripts are stored in macOS
   `UserDefaults`. The pre-2.0 `whisperModel` key is migrated to
