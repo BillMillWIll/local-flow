@@ -53,9 +53,9 @@ done
 ls "$RUNTIME_BIN_DIR"/libggml-cpu-*.so >/dev/null
 
 # Seit whisper.cpp 1.9.5 beendet sich -h vor dem Laden der Backends.
-# Eine echte WAV mit absichtlich fehlendem Modell erreicht dagegen die
+# Eine echte WAV mit vorhandener, ungültiger Mini-Modelldatei erreicht die
 # Runtime-Initialisierung, ohne ein großes Sprachmodell laden zu müssen.
-python3 - "$TEST_DIR/backend-check.wav" <<'PY'
+python3 - "$TEST_DIR/backend-check.wav" "$TEST_DIR/backend-check.bin" <<'PY'
 import sys
 import wave
 with wave.open(sys.argv[1], "wb") as audio:
@@ -63,9 +63,11 @@ with wave.open(sys.argv[1], "wb") as audio:
     audio.setsampwidth(2)
     audio.setframerate(16000)
     audio.writeframes(b"\0\0" * 1600)
+with open(sys.argv[2], "wb") as model:
+    model.write(b"\0\0\0\0")
 PY
 backend_probe() {
-    "$@" -m "$TEST_DIR/intentionally-missing-model.bin" -f "$TEST_DIR/backend-check.wav"
+    "$@" -m "$TEST_DIR/backend-check.bin" -f "$TEST_DIR/backend-check.wav"
 }
 
 # Die Backends müssen aus dem Bundle geladen werden, nicht aus Homebrew.
