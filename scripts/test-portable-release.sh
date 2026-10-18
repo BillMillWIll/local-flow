@@ -54,14 +54,16 @@ ls "$RUNTIME_BIN_DIR"/libggml-cpu-*.so >/dev/null
 
 # Die Backends müssen aus dem Bundle geladen werden, nicht aus Homebrew.
 for tool in "$WHISPER_BINARY" "$PARAKEET_BINARY"; do
-    backend_log="$(without_homebrew "$tool" -h 2>&1 | grep -F 'load_backend: loaded' || true)"
+    backend_output="$(without_homebrew "$tool" -h 2>&1 || true)"
+    backend_log="$(print -r -- "$backend_output" | grep -F 'load_backend: loaded' || true)"
     if ! print -r -- "$backend_log" | grep -Fq "loaded MTL backend from $RUNTIME_BIN_DIR"; then
         echo "Abbruch: $(basename "$tool") lädt das Metal-Backend nicht aus dem Bundle." >&2
-        print -r -- "$backend_log" >&2
+        print -r -- "$backend_output" >&2
         exit 1
     fi
     if ! print -r -- "$backend_log" | grep -Fq "loaded CPU backend from $RUNTIME_BIN_DIR"; then
         echo "Abbruch: $(basename "$tool") lädt das CPU-Backend nicht aus dem Bundle." >&2
+        print -r -- "$backend_output" >&2
         exit 1
     fi
 done
