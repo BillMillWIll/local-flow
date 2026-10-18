@@ -32,8 +32,13 @@ to a transcription API.
   NVIDIA Parakeet v3 and Whisper Large v3 Turbo
 - optional clean-up with Apple Intelligence: removes filler words and fixes
   punctuation on-device, switchable in the settings and the menu bar
-- personal dictionary: custom words (used directly by Whisper Turbo) and
-  replacement rules such as `neue Zeile = \n`
+- searchable personal dictionary with preferred spellings and observed
+  recognition errors, editing, undo, examples and a live correction preview
+- paste several words at once, one per line; existing comma lists migrate
+  automatically, without losing words
+- corrections work with all three engines; Whisper also receives spelling
+  hints (hints improve recognition but do not guarantee it)
+- spoken commands and text snippets such as `neue Zeile = \n`
 - protection against Whisper's silence hallucinations: minimum recording
   length, voice activity detection and a phrase filter
 - automatic, revision-pinned and checksum-verified model download
@@ -43,7 +48,7 @@ to a transcription API.
 - optional start and stop sounds, optional start at login
 - automatic update check with a direct link to the newest GitHub release
 - guided four-step first-run setup
-- compact native settings window with live status and three tabs
+- resizable native settings with live status and four scrollable tabs
 - dynamic menu-bar feedback while recording, transcribing and cleaning
 
 ## Requirements
@@ -51,6 +56,28 @@ to a transcription API.
 - Apple Silicon Mac
 - macOS 14 or newer; the Apple engine and the clean-up need macOS 26
 - internet connection for the one-time model download
+
+## Words that are repeatedly misrecognized
+
+Open **Wörterbuch → Wort hinzufügen…**. Enter the desired spelling and one
+actual recognition error, for example `Crockbot → GrokBot`. Save other
+variants, such as `Krugbot` and `Grockbot`, as additional entries with the
+same desired spelling. These exact corrections work with Apple, Parakeet
+and Whisper, regardless of capitalization. They do not change parts of
+longer words or identifiers.
+
+Use **Beispiele** to fill an example before saving it, or **Mehrere Wörter
+einfügen…** to paste a list with one preferred word per line. The old
+comma-separated list is imported automatically. A word saved without an
+error variant fixes capitalization when the word is already recognized;
+only Whisper also uses it as a recognition hint. This does not train the
+Apple or Parakeet models.
+
+The correction preview checks your dictionary and the text replacements
+immediately, without recording. **Sprechen → Aufnahme testen** checks the
+microphone and selected engine. **Text** contains optional Apple
+Intelligence clean-up and advanced spoken commands / text snippets.
+Clean-up cannot remove your protected names or spoken commands.
 
 ## Development
 

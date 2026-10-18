@@ -50,25 +50,14 @@ enum EngineRuntime {
     }
 
     static func run(_ executableURL: URL, arguments: [String]) throws {
-        let errorPipe = Pipe()
-        let process = Process()
-        process.executableURL = executableURL
-        process.arguments = arguments
-        process.environment = environment
-        process.standardError = errorPipe
-        process.standardOutput = Pipe()
-
-        try process.run()
-        process.waitUntilExit()
-
-        guard process.terminationStatus == 0 else {
-            if process.terminationReason == .uncaughtSignal {
+        let result = try LocalProcess.run(executableURL, arguments: arguments)
+        guard result.status == 0 else {
+            if result.uncaughtSignal {
                 throw LocalFlowError.transcriptionFailed(
-                    "\(executableURL.lastPathComponent) ist abgestürzt (Signal \(process.terminationStatus))."
+                    "\(executableURL.lastPathComponent) ist abgestürzt (Signal \(result.status))."
                 )
             }
-            let data = errorPipe.fileHandleForReading.readDataToEndOfFile()
-            let details = String(decoding: data, as: UTF8.self)
+            let details = result.standardError
                 .trimmingCharacters(in: .whitespacesAndNewlines)
                 .components(separatedBy: .newlines)
                 .filter { !$0.hasPrefix("load_backend") && !$0.hasPrefix("ggml_") }

@@ -8,7 +8,7 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate, N
         var onKeyChanged: (PushToTalkKey) -> Void
         var onEngineChanged: (RecognitionEngine) -> Void
         var onMicrophoneChanged: (MicrophoneSelection) -> Void
-        var onCustomWordsChanged: (String) -> Void
+        var onDictionaryChanged: (PersonalDictionary) -> Void
         var onReplacementRulesChanged: (String) -> Void
         var onCleanupChanged: (Bool) -> Void
         var onSoundsChanged: (Bool) -> Void
@@ -25,7 +25,7 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate, N
         var selectedEngine: RecognitionEngine
         var availableEngines: [RecognitionEngine]
         var selectedMicrophone: MicrophoneSelection
-        var customWords: String
+        var dictionary: PersonalDictionary
         var replacementRules: String
         var cleanupEnabled: Bool
         var cleanupAvailability: TextCleanup.Availability
@@ -56,7 +56,7 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate, N
     private let accessibilityPermissionButton = NSButton()
     private let cleanupCheckbox = NSButton(checkboxWithTitle: "Mit Apple Intelligence bereinigen", target: nil, action: nil)
     private let cleanupDetailLabel = NSTextField(wrappingLabelWithString: "")
-    private let customWordsField = NSTextField()
+    private var dictionaryView: DictionaryView?
     private let replacementRulesView = NSTextView()
     private let soundsCheckbox = NSButton(checkboxWithTitle: "Ton bei Start und Stopp der Aufnahme", target: nil, action: nil)
     private let loginCheckbox = NSButton(checkboxWithTitle: "Local Flow beim Anmelden starten", target: nil, action: nil)
@@ -72,14 +72,16 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate, N
         self.availableEngines = state.availableEngines
 
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 600, height: 600),
-            styleMask: [.titled, .closable, .miniaturizable],
+            contentRect: NSRect(x: 0, y: 0, width: 680, height: 760),
+            styleMask: [.titled, .closable, .miniaturizable, .resizable],
             backing: .buffered,
             defer: false
         )
         window.title = "Local Flow"
         window.center()
         window.isReleasedWhenClosed = false
+        window.contentMinSize = NSSize(width: 640, height: 620)
+        window.setFrameAutosaveName("LocalFlowSettings")
 
         super.init(window: window)
         configureContent(state: state)
@@ -91,6 +93,12 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate, N
     }
 
     // MARK: - State updates
+
+    var isEditingSettings: Bool {
+        guard let window,
+              NSApp.keyWindow === window || NSApp.keyWindow?.sheetParent === window else { return false }
+        return captureMonitor != nil || window.attachedSheet != nil || window.firstResponder is NSTextView
+    }
 
     func show() {
         showWindow(nil)
@@ -121,6 +129,7 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate, N
             enginePopup.selectItem(at: index)
         }
         engineDetailLabel.stringValue = engine.detail
+        dictionaryView?.setEngine(engine)
     }
 
     func setEngineDetail(_ text: String) {
@@ -251,6 +260,10 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate, N
         let tabView = NSTabView()
         tabView.tabViewType = .topTabsBezelBorder
         tabView.addTabViewItem(tabItem(title: "Sprechen", view: makeSpeakingTab(state: state)))
+        let dictionary = DictionaryView(dictionary: state.dictionary, engine: state.selectedEngine, onChange: callbacks.onDictionaryChanged)
+        dictionary.replacementRules = ReplacementRules.parse(state.replacementRules)
+        dictionaryView = dictionary
+        tabView.addTabViewItem(tabItem(title: "Wörterbuch", view: dictionary))
         tabView.addTabViewItem(tabItem(title: "Text", view: makeTextTab(state: state)))
         tabView.addTabViewItem(tabItem(title: "Erweitert", view: makeAdvancedTab(state: state)))
 
@@ -351,7 +364,6 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate, N
         testButton.target = self
         testButton.action = #selector(testRecording)
         testButton.bezelStyle = .rounded
-        testButton.keyEquivalent = "\r"
         testButton.contentTintColor = .systemMint
         testButton.bezelColor = .systemMint
 
@@ -428,20 +440,14 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate, N
         cleanupDetailLabel.font = .systemFont(ofSize: 11)
         cleanupDetailLabel.textColor = .secondaryLabelColor
 
-        customWordsField.stringValue = state.customWords
-        customWordsField.placeholderString = "Cuban, Moissanite, BABA"
-        customWordsField.delegate = self
-        customWordsField.font = .systemFont(ofSize: 13)
-        let wordsHint = hintLabel(
-            "Namen und Fachwörter, durch Kommas getrennt. Whisper Turbo lernt die Schreibweise direkt."
-        )
-
         replacementRulesView.string = state.replacementRules
         replacementRulesView.font = .monospacedSystemFont(ofSize: 12, weight: .regular)
         replacementRulesView.isRichText = false
+        replacementRulesView.allowsUndo = true
         replacementRulesView.isAutomaticQuoteSubstitutionEnabled = false
         replacementRulesView.isAutomaticDashSubstitutionEnabled = false
         replacementRulesView.isAutomaticTextReplacementEnabled = false
+        replacementRulesView.isAutomaticSpellingCorrectionEnabled = false
         replacementRulesView.delegate = self
         replacementRulesView.textContainerInset = NSSize(width: 6, height: 6)
         replacementRulesView.isVerticallyResizable = true
@@ -455,7 +461,7 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate, N
         scrollView.translatesAutoresizingMaskIntoConstraints = false
 
         let rulesHint = hintLabel(
-            "Eine Regel je Zeile: gehört = gewünscht. Gilt für jede Erkennung. \\n steht für einen Zeilenumbruch."
+            "Für Sprachbefehle und Textbausteine: eine Regel je Zeile, gehört = gewünscht. \\n erzeugt einen Zeilenumbruch. Namen und Fachwörter verwaltest du im Wörterbuch."
         )
 
         let stack = tabStack([
@@ -463,20 +469,14 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate, N
             cleanupCheckbox,
             cleanupDetailLabel,
             divider(),
-            sectionLabel("EIGENE WÖRTER"),
-            customWordsField,
-            wordsHint,
-            divider(),
-            sectionLabel("ERSETZUNGEN"),
+            sectionLabel("SPRACHBEFEHLE UND TEXTBAUSTEINE"),
             scrollView,
             rulesHint
         ])
         NSLayoutConstraint.activate([
             cleanupDetailLabel.widthAnchor.constraint(equalTo: stack.widthAnchor),
-            customWordsField.widthAnchor.constraint(equalTo: stack.widthAnchor),
-            wordsHint.widthAnchor.constraint(equalTo: stack.widthAnchor),
             scrollView.widthAnchor.constraint(equalTo: stack.widthAnchor),
-            scrollView.heightAnchor.constraint(equalToConstant: 96),
+            scrollView.heightAnchor.constraint(equalToConstant: 150),
             rulesHint.widthAnchor.constraint(equalTo: stack.widthAnchor)
         ])
         return stack
@@ -538,17 +538,22 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate, N
     private func tabItem(title: String, view: NSView) -> NSTabViewItem {
         let item = NSTabViewItem(identifier: title)
         item.label = title
-        let container = NSView()
+        let container = FlippedSettingsView()
         view.translatesAutoresizingMaskIntoConstraints = false
         container.addSubview(view)
         NSLayoutConstraint.activate([
             view.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 16),
             view.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -16),
             view.topAnchor.constraint(equalTo: container.topAnchor, constant: 14),
-            view.bottomAnchor.constraint(lessThanOrEqualTo: container.bottomAnchor, constant: -14),
-            container.heightAnchor.constraint(greaterThanOrEqualToConstant: 360)
+            view.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -14)
         ])
-        item.view = container
+        let scroll = NSScrollView()
+        scroll.drawsBackground = false
+        scroll.hasVerticalScroller = true
+        container.translatesAutoresizingMaskIntoConstraints = false
+        scroll.documentView = container
+        container.widthAnchor.constraint(equalTo: scroll.contentView.widthAnchor).isActive = true
+        item.view = scroll
         return item
     }
 
@@ -655,6 +660,7 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate, N
         guard availableEngines.indices.contains(enginePopup.indexOfSelectedItem) else { return }
         let engine = availableEngines[enginePopup.indexOfSelectedItem]
         engineDetailLabel.stringValue = engine.detail
+        dictionaryView?.setEngine(engine)
         callbacks.onEngineChanged(engine)
         setStatus("Erkennung gespeichert: \(engine.shortTitle)")
     }
@@ -678,14 +684,10 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate, N
         callbacks.onLoginItemChanged(loginCheckbox.state == .on)
     }
 
-    func controlTextDidChange(_ notification: Notification) {
-        guard notification.object as? NSTextField === customWordsField else { return }
-        callbacks.onCustomWordsChanged(customWordsField.stringValue)
-    }
-
     func textDidChange(_ notification: Notification) {
         guard notification.object as? NSTextView === replacementRulesView else { return }
         callbacks.onReplacementRulesChanged(replacementRulesView.string)
+        dictionaryView?.replacementRules = ReplacementRules.parse(replacementRulesView.string)
     }
 
     @objc private func testRecording() {
@@ -747,6 +749,13 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate, N
         let events: NSEvent.EventTypeMask = [.flagsChanged, .keyDown, .systemDefined]
         captureMonitor = NSEvent.addLocalMonitorForEvents(matching: events) { [weak self] event in
             guard let self else { return event }
+            if event.type == .keyDown, event.keyCode == 53 {
+                self.captureMonitor.map(NSEvent.removeMonitor)
+                self.captureMonitor = nil
+                self.learnKeyButton.isEnabled = true
+                self.setStatus("Tastenwahl abgebrochen.")
+                return nil
+            }
             if let key = self.learnedKey(from: event) {
                 self.finishKeyCapture(with: key)
                 return nil
@@ -849,4 +858,8 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate, N
         let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone")!
         NSWorkspace.shared.open(url)
     }
+}
+
+private final class FlippedSettingsView: NSView {
+    override var isFlipped: Bool { true }
 }

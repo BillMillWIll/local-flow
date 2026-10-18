@@ -12,6 +12,20 @@ public struct ReplacementRule: Equatable, Sendable {
 }
 
 public enum ReplacementRules {
+    private static func pattern(for match: String) -> String {
+        let phrase = match.precomposedStringWithCanonicalMapping.split(whereSeparator: { $0 == " " || $0 == "\t" })
+            .map { NSRegularExpression.escapedPattern(for: String($0)) }
+            .joined(separator: "[\\p{Zs}\\t]+")
+        return "(?<![\\p{L}\\p{M}\\p{N}_])(?:\(phrase))(?![\\p{L}\\p{M}\\p{N}_])"
+    }
+
+    public static func countMatches(of phrase: String, in text: String, caseSensitive: Bool = false) -> Int {
+        guard !phrase.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              let regex = try? NSRegularExpression(pattern: pattern(for: phrase), options: caseSensitive ? [] : [.caseInsensitive]) else { return 0 }
+        let normalized = text.precomposedStringWithCanonicalMapping
+        return regex.numberOfMatches(in: normalized, range: NSRange(normalized.startIndex..., in: normalized))
+    }
+
     /// Rules every new installation starts with. Users can edit or delete them.
     public static let defaultText = """
     neue Zeile = \\n
@@ -41,19 +55,24 @@ public enum ReplacementRules {
     /// inserted line breaks is removed so dictated "neue Zeile" produces a
     /// clean break.
     public static func apply(_ rules: [ReplacementRule], to text: String) -> String {
+        let text = text.precomposedStringWithCanonicalMapping
+        // Match against the original only: replacements must never trigger
+        // other replacements. Longer phrases take precedence over their words.
+        let ordered = rules.enumerated().filter { !$0.element.match.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }.sorted {
+            if $0.element.match.count == $1.element.match.count { return $0.offset < $1.offset }
+            return $0.element.match.count > $1.element.match.count
+        }.map(\.element)
+        guard !ordered.isEmpty else { return text }
+        let patterns = ordered.map { "(" + pattern(for: $0.match) + ")" }
+        guard let regex = try? NSRegularExpression(
+            pattern: patterns.joined(separator: "|"),
+            options: [.caseInsensitive]
+        ) else { return text }
         var result = text
-        for rule in rules {
-            let pattern = "(?<!\\p{L})" + NSRegularExpression.escapedPattern(for: rule.match) + "(?!\\p{L})"
-            guard let regex = try? NSRegularExpression(
-                pattern: pattern,
-                options: [.caseInsensitive]
-            ) else { continue }
-            let template = NSRegularExpression.escapedTemplate(for: rule.replacement)
-            result = regex.stringByReplacingMatches(
-                in: result,
-                range: NSRange(result.startIndex..., in: result),
-                withTemplate: template
-            )
+        for match in regex.matches(in: text, range: NSRange(text.startIndex..., in: text)).reversed() {
+            guard let index = ordered.indices.first(where: { match.range(at: $0 + 1).location != NSNotFound }),
+                  let range = Range(match.range, in: result) else { continue }
+            result.replaceSubrange(range, with: ordered[index].replacement)
         }
 
         guard result.contains("\n") else { return result }
@@ -71,8 +90,8 @@ public enum CustomWords {
     public static func parse(_ text: String) -> [String] {
         var seen = Set<String>()
         return text
-            .components(separatedBy: CharacterSet(charactersIn: ",\n"))
-            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .components(separatedBy: CharacterSet.newlines.union(CharacterSet(charactersIn: ",")))
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty && seen.insert($0.lowercased()).inserted }
     }
 
@@ -97,7 +116,7 @@ public enum RecordingGuard {
 public enum CleanupGuard {
     /// Accepts an LLM-cleaned transcript only when it is plausibly the same
     /// text; otherwise the raw transcript is kept so nothing is lost.
-    public static func accept(original: String, cleaned: String) -> String {
+    public static func accept(original: String, cleaned: String, protectedTerms: [String] = [], protectedCommands: [String] = []) -> String {
         var trimmed = cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
         // Models sometimes echo the prompt label or wrap the answer in quotes.
         if let range = trimmed.range(of: "^Text:\\s*", options: .regularExpression) {
@@ -112,8 +131,20 @@ public enum CleanupGuard {
         }
         guard !trimmed.isEmpty else { return original }
 
+        // Names and explicit paragraphs are user intent, not stylistic choices.
+        for term in protectedTerms where !term.isEmpty {
+            guard ReplacementRules.countMatches(of: term, in: original, caseSensitive: true)
+                == ReplacementRules.countMatches(of: term, in: trimmed, caseSensitive: true) else { return original }
+        }
+        for command in protectedCommands {
+            guard ReplacementRules.countMatches(of: command, in: original)
+                == ReplacementRules.countMatches(of: command, in: trimmed) else { return original }
+        }
+        if original.contains("\n"), original.filter({ $0 == "\n" }).count != trimmed.filter({ $0 == "\n" }).count {
+            return original
+        }
+
         let originalCount = Double(original.count)
-        guard originalCount > 20 else { return trimmed }
         let ratio = Double(trimmed.count) / originalCount
         guard (0.4...1.6).contains(ratio) else { return original }
         return trimmed

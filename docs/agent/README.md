@@ -17,7 +17,7 @@ current source of truth.
 
 ## Canonical Repository and Distribution
 
-- Local repository: `~/Desktop/local-flow` (own Git repository since 2026-09-04;
+- Local repository: `~/Desktop/apps/local-flow` (own Git repository since 2026-09-04;
   the ArtMotion monorepo only keeps a reference stub)
 - Public repository: `https://github.com/BillMillWIll/local-flow`
 - Permanent latest-download page:

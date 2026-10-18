@@ -68,7 +68,7 @@ enum TextCleanup {
 
     /// Returns the cleaned text, or the original whenever the model is
     /// unavailable, refuses, or produces something implausible.
-    static func clean(_ text: String) async -> String {
+    static func clean(_ text: String, protectedTerms: [String] = [], protectedCommands: [String] = []) async -> String {
         #if canImport(FoundationModels)
         if #available(macOS 26.0, *), availability().isAvailable {
             let session = await SessionStore.shared.take()
@@ -78,7 +78,7 @@ enum TextCleanup {
                     to: "Text:\n\(text)",
                     options: GenerationOptions(temperature: 0)
                 )
-                return CleanupGuard.accept(original: text, cleaned: response.content)
+                return CleanupGuard.accept(original: text, cleaned: response.content, protectedTerms: protectedTerms, protectedCommands: protectedCommands)
             } catch {
                 return text
             }

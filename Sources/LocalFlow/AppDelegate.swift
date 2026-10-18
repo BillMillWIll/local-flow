@@ -14,6 +14,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         static let transcriptHistory = "transcriptHistory"
         static let onboardingCompleted = "onboardingCompleted"
         static let customWords = "customWords"
+        static let personalDictionary = "personalDictionary"
         static let replacementRules = "replacementRules"
         static let cleanupEnabled = "cleanupEnabled"
         static let soundsDisabled = "soundsDisabled"
@@ -41,7 +42,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var selectedKey = PushToTalkKey.defaultKey
     private var selectedEngine = RecognitionEngine.parakeet
     private var selectedMicrophone = MicrophoneSelection.systemDefault
-    private var customWordsText = ""
+    private var personalDictionary = PersonalDictionary()
     private var replacementRulesText = ReplacementRules.defaultText
     private var cleanupEnabled = false
     private var soundsEnabled = true
@@ -117,7 +118,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
         selectedMicrophone = MicrophoneSelection(savedValue: defaults.string(forKey: Keys.microphoneSelection))
         transcriptHistory = TranscriptHistory(entries: defaults.stringArray(forKey: Keys.transcriptHistory) ?? [])
-        customWordsText = defaults.string(forKey: Keys.customWords) ?? ""
+        if let data = defaults.data(forKey: Keys.personalDictionary),
+           let saved = try? JSONDecoder().decode(PersonalDictionary.self, from: data) {
+            personalDictionary = saved
+        } else {
+            personalDictionary = PersonalDictionary(legacyWords: defaults.string(forKey: Keys.customWords) ?? "")
+        }
         replacementRulesText = defaults.string(forKey: Keys.replacementRules) ?? ReplacementRules.defaultText
         cleanupEnabled = defaults.bool(forKey: Keys.cleanupEnabled) && TextCleanup.availability().isAvailable
         soundsEnabled = !defaults.bool(forKey: Keys.soundsDisabled)
@@ -194,7 +200,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             selectedEngine: selectedEngine,
             availableEngines: RecognitionEngine.available(appleSupported: AppleSpeechSupport.isSupported),
             selectedMicrophone: selectedMicrophone,
-            customWords: customWordsText,
+            dictionary: personalDictionary,
             replacementRules: replacementRulesText,
             cleanupEnabled: cleanupEnabled,
             cleanupAvailability: TextCleanup.availability(),
@@ -205,9 +211,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             onKeyChanged: { [weak self] key in self?.changePushToTalkKey(to: key) },
             onEngineChanged: { [weak self] engine in self?.changeEngine(to: engine) },
             onMicrophoneChanged: { [weak self] microphone in self?.changeMicrophone(to: microphone) },
-            onCustomWordsChanged: { [weak self] text in
-                self?.customWordsText = text
-                self?.defaults.set(text, forKey: Keys.customWords)
+            onDictionaryChanged: { [weak self] dictionary in
+                self?.personalDictionary = dictionary
+                if let data = try? JSONEncoder().encode(dictionary) {
+                    self?.defaults.set(data, forKey: Keys.personalDictionary)
+                }
             },
             onReplacementRulesChanged: { [weak self] text in
                 self?.replacementRulesText = text
@@ -340,6 +348,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func pushToTalkPressed() {
+        if !pushToTalkState.isRecording, settingsWindowController?.isEditingSettings == true {
+            doubleTap.reset()
+            return
+        }
         let isDoubleTap = doubleTap.press(at: now)
 
         if pushToTalkState.isHandsFree {
@@ -442,7 +454,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func beginTestRecording() {
-        guard !isTestRecording, !isInstallingModel, !pushToTalkState.isRecording else { return }
+        guard !isTestRecording, !isInstallingModel, pushToTalkState.isIdle else { return }
         guard isEngineReady else {
             Task { await prepareSelectedEngineIfNeeded() }
             return
@@ -489,7 +501,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
             setActivity(.processing)
             let engine = EngineFactory.make(selectedEngine)
-            let options = TranscriptionOptions(customWords: CustomWords.parse(customWordsText))
+            let dictionary = personalDictionary
+            let options = TranscriptionOptions(customWords: dictionary.promptWords)
             let rules = ReplacementRules.parse(replacementRulesText)
             let shouldClean = cleanupEnabled
 
@@ -497,11 +510,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 let result: Result<String, Error>
                 do {
                     let raw = try await engine.transcribe(audioURL: audioURL, options: options)
-                    var text = ReplacementRules.apply(rules, to: raw)
+                    var text = dictionary.apply(to: raw)
                     if shouldClean, !text.isEmpty {
                         setActivity(.cleaning)
-                        text = await TextCleanup.clean(text)
+                        text = await TextCleanup.clean(text, protectedTerms: dictionary.promptWords, protectedCommands: rules.map(\.match))
                     }
+                    text = ReplacementRules.apply(rules, to: text)
                     let final = text.trimmingCharacters(in: .whitespacesAndNewlines)
                     if final.isEmpty {
                         result = .failure(LocalFlowError.emptyTranscript)

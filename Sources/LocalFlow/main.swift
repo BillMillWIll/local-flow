@@ -30,6 +30,7 @@ if let argumentIndex = CommandLine.arguments.firstIndex(of: "--download-model"),
    let model = ModelCatalog.file(named: CommandLine.arguments[argumentIndex + 1]) {
     runModelDownloadDiagnostic(model: model)
 } else {
+    ApplicationMenu.install()
     let delegate = AppDelegate()
     app.delegate = delegate
     app.setActivationPolicy(.regular)

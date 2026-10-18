@@ -1,6 +1,6 @@
 # Current State
 
-Updated: 4 September 2026
+Updated: 18 October 2026
 
 This is the first file to read in a new session before changing Local Flow.
 Repository-wide AI instructions and the mandatory release workflow are defined
@@ -14,7 +14,7 @@ in `docs/agent/`.
 - Bundle identifier: `de.artmotion.localflow`
 - Current version: read from `VERSION`
 - Intended distribution: friends and colleagues through GitHub Releases
-- Own Git repository at `~/Desktop/local-flow` since 2026-09-04; the ArtMotion
+- Own Git repository at `~/Desktop/apps/local-flow` since 2026-09-04; the ArtMotion
   monorepo only keeps a reference stub
 
 ## Runtime Architecture
@@ -36,10 +36,17 @@ in `docs/agent/`.
 - Every downloaded model is pinned to a Hugging Face revision and checked
   against a hard-coded SHA-256 checksum (`ModelCatalog` in
   `LocalFlowCore/Engines.swift`).
-- Text pipeline after recognition: `TranscriptCleaner` (noise markers and
-  Whisper hallucination phrases) → replacement rules → optional
-  `TextCleanup` with the Foundation Models framework, guarded by
-  `CleanupGuard` so an implausible result falls back to the raw text.
+- Text pipeline after recognition: `TranscriptCleaner` → personal dictionary
+  (observed errors and preferred spelling) → optional `TextCleanup` → spoken
+  commands / text snippets. `CleanupGuard` protects dictionary names, command
+  occurrences and explicit paragraphs, including short dictations.
+- Dictionary corrections work for all engines. Only Whisper receives the
+  word list as an acoustic spelling hint; this does not train any model.
+- Replacement rules match the original input once, longest phrase first,
+  with Unicode word boundaries and canonical normalization. Output cannot
+  trigger another rule. Horizontal whitespace in phrases is flexible.
+- CLI stderr is drained while running; unused stdout goes to `/dev/null`.
+  Both output channels previously could block on a full pipe.
 - Recording guards: recordings under 0.4 s are dropped as accidental taps,
   recordings stop automatically after 5 minutes, `Esc` cancels.
 - Push-to-talk gestures: hold; double tap for hands-free; a menu item can
@@ -55,15 +62,23 @@ in `docs/agent/`.
   it stops; otherwise the Apple engine transcribes the sound as a word.
 - Models are stored in `~/Library/Application Support/LocalFlow/`.
 - App settings, dictionary and the last five transcripts are stored in macOS
-  `UserDefaults`. The pre-2.0 `whisperModel` key is migrated to
+  `UserDefaults`. The dictionary is Codable JSON Data under `personalDictionary`;
+  the old `customWords` list is migrated on read and kept for recovery. The
+  pre-2.0 `whisperModel` key is migrated to
   `recognitionEngine`.
 
 ## Main Files
 
 - `Sources/LocalFlow/AppDelegate.swift`: menu bar, recording flow, engine
   preparation, updates
-- `Sources/LocalFlow/SettingsWindowController.swift`: settings window with
-  the tabs Sprechen, Text, Erweitert
+- `Sources/LocalFlow/SettingsWindowController.swift`: resizable settings with
+  the scrollable tabs Sprechen, Wörterbuch, Text, Erweitert
+- `Sources/LocalFlow/DictionaryView.swift`: searchable native table, add/edit,
+  remove with undo, examples, bulk paste and correction preview
+- `Sources/LocalFlow/ApplicationMenu.swift`: native application and editing menus;
+  clipboard and select-all keyboard shortcuts need this responder-chain wiring
+- `Sources/LocalFlowCore/PersonalDictionary.swift`: migration, validation,
+  preferred spellings and exact recognition variants
 - `Sources/LocalFlow/OnboardingWindowController.swift`: four-step setup
 - `Sources/LocalFlow/Engines/`: engine protocol, runtime lookup, Whisper,
   Parakeet, Apple
@@ -71,7 +86,7 @@ in `docs/agent/`.
 - `Sources/LocalFlow/SystemIntegration.swift`: sounds, login item
 - `Sources/LocalFlowCore/`: testable logic (engines, dictionary, gestures,
   state machine, cleaner, history)
-- `Tests/LocalFlowCoreTests/`: automated tests (66)
+- `Tests/LocalFlowCoreTests/`: automated tests (83 as of 2.1.0)
 - `scripts/check-release.sh`: secret scan, tracked-file validation and tests
 - `scripts/build-app.sh`: portable application bundle
 - `scripts/build-dmg.sh`: final DMG and SHA-256 file
@@ -82,6 +97,16 @@ in `docs/agent/`.
 - `AUDIT-2026-09.md`: measured engine comparison behind the 2.0 decisions
 
 ## Release State
+
+- 2.1.0 replaces the misleading comma field with an engine-aware dictionary.
+  Existing lists are preserved. The app supports search, individual editing,
+  undo, example forms, bulk paste and a local preview. It fixes cascading
+  replacements, identifier boundaries, decomposed umlauts, clean-up removing
+  names or commands, short-text clean-up expansion and CLI pipe deadlocks.
+  Editing settings no longer starts dictation through an ordinary configured
+  typing key; Esc cancels key capture. Tests cannot overlap a running dictation.
+  Standard editing shortcuts now work through the native Edit menu.
+  Evidence and remaining limits: `AUDIT-2026-10.md`.
 
 - 2.0.0 is the first release with engine selection, clean-up, dictionary,
   hands-free mode and the hallucination guards.

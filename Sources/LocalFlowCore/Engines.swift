@@ -98,11 +98,11 @@ public enum RecognitionEngine: String, CaseIterable, Sendable {
     public var detail: String {
         switch self {
         case .apple:
-            return "Die Spracherkennung von macOS 26. Am schnellsten, kein Download, erfindet bei Stille nichts. Eigene Wörter wirken nur über Ersetzungen."
+            return "Lokale macOS-Erkennung ohne separaten Modell-Download. Fehlvarianten und Schreibweisen verwaltest du im Wörterbuch."
         case .parakeet:
-            return "NVIDIA-Modell, läuft lokal. Fast so schnell wie Apple, braucht einmalig 670 MB. Eigene Wörter wirken nur über Ersetzungen."
+            return "Lokale Erkennung von NVIDIA, einmalig 670 MB. Fehlvarianten und Schreibweisen verwaltest du im Wörterbuch."
         case .whisperTurbo:
-            return "Das Modell aus Version 1.x. Etwas langsamer, versteht eigene Wörter aus dem Tab „Text“ direkt."
+            return "Lokale Erkennung mit Worthinweisen aus dem Wörterbuch, einmalig 551 MB. Worthinweise helfen bei Namen, garantieren aber keine richtige Erkennung."
         }
     }
 
