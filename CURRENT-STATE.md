@@ -107,6 +107,9 @@ in `docs/agent/`.
   typing key; Esc cancels key capture. Tests cannot overlap a running dictation.
   Standard editing shortcuts now work through the native Edit menu.
   Evidence and remaining limits: `AUDIT-2026-10.md`.
+  Published and installed locally; public DMG re-downloaded and verified.
+  Fresh macOS-26 release check passed:
+  https://github.com/BillMillWIll/local-flow/actions/runs/39139963634
 
 - 2.0.0 is the first release with engine selection, clean-up, dictionary,
   hands-free mode and the hallucination guards.
