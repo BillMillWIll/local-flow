@@ -52,9 +52,25 @@ for required_file in \
 done
 ls "$RUNTIME_BIN_DIR"/libggml-cpu-*.so >/dev/null
 
+# Seit whisper.cpp 1.9.5 beendet sich -h vor dem Laden der Backends.
+# Eine echte WAV mit absichtlich fehlendem Modell erreicht dagegen die
+# Runtime-Initialisierung, ohne ein großes Sprachmodell laden zu müssen.
+python3 - "$TEST_DIR/backend-check.wav" <<'PY'
+import sys
+import wave
+with wave.open(sys.argv[1], "wb") as audio:
+    audio.setnchannels(1)
+    audio.setsampwidth(2)
+    audio.setframerate(16000)
+    audio.writeframes(b"\0\0" * 1600)
+PY
+backend_probe() {
+    "$@" -m "$TEST_DIR/intentionally-missing-model.bin" -f "$TEST_DIR/backend-check.wav"
+}
+
 # Die Backends müssen aus dem Bundle geladen werden, nicht aus Homebrew.
 for tool in "$WHISPER_BINARY" "$PARAKEET_BINARY"; do
-    backend_output="$(without_homebrew "$tool" -h 2>&1 || true)"
+    backend_output="$(backend_probe without_homebrew "$tool" 2>&1 || true)"
     backend_log="$(print -r -- "$backend_output" | grep -F 'load_backend: loaded' || true)"
     if ! print -r -- "$backend_log" | grep -Fq "loaded MTL backend from $RUNTIME_BIN_DIR"; then
         echo "Abbruch: $(basename "$tool") lädt das Metal-Backend nicht aus dem Bundle." >&2
@@ -69,7 +85,7 @@ for tool in "$WHISPER_BINARY" "$PARAKEET_BINARY"; do
 done
 
 # Auch mit sichtbarem Homebrew dürfen keine fremden Backends geladen werden.
-if "$WHISPER_BINARY" -h 2>&1 | grep -F 'load_backend: loaded' | grep -Fq '/opt/homebrew'; then
+if (backend_probe "$WHISPER_BINARY" 2>&1 || true) | grep -F 'load_backend: loaded' | grep -Fq '/opt/homebrew'; then
     echo "Abbruch: whisper-cli lädt Backends aus Homebrew statt aus dem Bundle." >&2
     exit 1
 fi
